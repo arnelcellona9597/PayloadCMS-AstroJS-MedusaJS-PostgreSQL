@@ -1,0 +1,115 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import { getPostBySlug } from '../../lib/payload'
+import { lexicalToHtml } from '../../lib/lexical'
+import { imageUrl } from '../../lib/types'
+
+export const prerender = false
+
+/**
+ * Public post page.
+ *
+ * ── Route precedence ──────────────────────────────────────────────────────
+ * This file matches /posts/anything, and `posts/new.astro` also matches
+ * /posts/new. Astro prefers the STATIC route, so /posts/new is the create form
+ * and never lands here. Worth knowing before you name a slug "new".
+ *
+ * ── Why the draft read is separate ────────────────────────────────────────
+ * The first call is anonymous, so Payload's `read` access rule narrows it to
+ * published documents. If nothing comes back we retry WITH the API key: if the
+ * post exists as a draft we can say so honestly instead of showing a bare 404.
+ * Two requests, but it makes the access-control behaviour visible.
+ */
+const { slug } = Astro.params
+
+const post = await getPostBySlug(slug!)
+
+let draftOnly = false
+
+if (!post) {
+  const asEditor = await getPostBySlug(slug!, { includeDrafts: true })
+  draftOnly = Boolean(asEditor)
+
+  if (!draftOnly) {
+    return new Response('Post not found', { status: 404 })
+  }
+}
+
+const html = post ? lexicalToHtml(post.content) : ''
+const category = post?.category && typeof post.category === 'object' ? post.category : null
+const published = post?.publishedAt ?? post?.createdAt
+---
+
+{
+  draftOnly ? (
+    <Layout title="Not published" subtitle="This post exists, but it is still a draft." section="posts">
+      <div class="notice info">
+        <p>
+          An anonymous request for <code class="path">/api/posts?where[slug][equals]={slug}</code> returns nothing,
+          because the collection's <code>read</code> rule narrows the query to <code>_status: published</code>. The same
+          request WITH the API key finds it.
+        </p>
+      </div>
+      <p>
+        <a class="btn" href="/posts">Back to posts</a>
+      </p>
+    </Layout>
+  ) : (
+    <Layout title={post!.title} subtitle={post!.excerpt ?? undefined} section="posts">
+      <article>
+        <p class="row small muted">
+          {category && <span class="badge neutral">{category.name}</span>}
+          <span>{new Date(published!).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          <span class:list={['badge', post!._status ?? 'draft']}>{post!._status}</span>
+        </p>
+
+        {/*
+          `coverImage` is an `upload` relationship. It only arrives as an object
+          — and therefore only has a URL — because this page fetches at depth 2.
+          At depth 0 it would be a bare id and imageUrl() would return null.
+        */}
+        {imageUrl(post!.coverImage, 'card') && (
+          <img
+            class="cover"
+            src={imageUrl(post!.coverImage, 'card')}
+            alt={typeof post!.coverImage === 'object' ? (post!.coverImage?.alt ?? '') : ''}
+            width="768"
+            height="512"
+            loading="eager"
+          />
+        )}
+
+        {/*
+          `set:html` is Astro's explicit opt-in to unescaped HTML. It is safe here
+          because lexicalToHtml() escapes every text node itself — see
+          src/lib/lexical.ts. Never pass raw CMS output straight into it.
+        */}
+        <div class="prose" set:html={html} />
+
+        {post!.tags && post!.tags.length > 0 && (
+          <p class="row small" style="margin-top:24px">
+            {post!.tags.map((t) => (
+              <span class="badge neutral">{t.tag}</span>
+            ))}
+          </p>
+        )}
+      </article>
+
+      <div class="row" style="margin-top:32px">
+        <a class="btn" href="/posts">All posts</a>
+        <a class="btn" href={`/posts/${post!.id}/edit`}>Edit</a>
+      </div>
+    </Layout>
+  )
+}
+
+<style>
+  .cover {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    margin: 20px 0 28px;
+  }
+</style>

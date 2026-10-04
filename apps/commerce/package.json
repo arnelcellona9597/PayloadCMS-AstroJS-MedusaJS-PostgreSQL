@@ -1,0 +1,45 @@
+{
+  "name": "commerce",
+  "version": "0.0.1",
+  "description": "Medusa 2 backend: a custom Review module with data model, module link, workflows, validated Store + Admin API routes, and an admin widget.",
+  "license": "MIT",
+  "scripts": {
+    "build": "medusa build",
+    "dev": "medusa develop",
+    "start": "medusa start",
+    "seed": "medusa exec ./src/scripts/seed.ts",
+    "seed:reviews": "medusa exec ./src/scripts/seed-reviews.ts",
+    "bootstrap": "medusa exec ./src/scripts/bootstrap.ts",
+    "db:generate": "medusa db:generate review",
+    "db:migrate": "medusa db:migrate",
+    "user": "medusa user",
+    "typecheck": "tsc --noEmit",
+    "test:compensation": "medusa exec ./src/scripts/test-compensation.ts"
+  },
+  "dependencies": {
+    "@medusajs/admin-sdk": "2.19.0",
+    "@medusajs/cache-redis": "2.19.0",
+    "@medusajs/cli": "2.19.0",
+    "@medusajs/event-bus-redis": "2.19.0",
+    "@medusajs/framework": "2.19.0",
+    "@medusajs/locking": "2.19.0",
+    "@medusajs/locking-redis": "2.19.0",
+    "@medusajs/medusa": "2.19.0",
+    "@medusajs/workflow-engine-redis": "2.19.0"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.16.1",
+    "@types/node": "^20.12.11",
+    "@types/react": "^18.3.2",
+    "@types/react-dom": "^18.2.25",
+    "prop-types": "^15.8.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.14"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

@@ -1,0 +1,86 @@
+---
+import { actions, isInputError } from 'astro:actions'
+
+import Layout from '../../../layouts/Layout.astro'
+import PostFormFields from '../../../components/PostFormFields.astro'
+import { getPost, listCategories } from '../../../lib/payload'
+import { lexicalToPlainParagraphs } from '../../../lib/lexical'
+import type { Post } from '../../../lib/types'
+
+export const prerender = false
+
+const { id } = Astro.params
+
+const result = Astro.getActionResult(actions.post.update)
+
+if (result && !result.error) {
+  return Astro.redirect('/posts?updated=' + result.data.id)
+}
+
+const fieldErrors = result?.error && isInputError(result.error) ? result.error.fields : {}
+
+let post: Post
+
+try {
+  // depth 1 so `category` arrives as a document (we need its id for the select).
+  post = await getPost(id!, 1)
+} catch (error) {
+  // Returning here keeps `post` non-nullable below — no `post!` assertions.
+  return new Response(
+    // PayloadError extends Error and already carries a useful message.
+    error instanceof Error ? error.message : 'Could not load the post.',
+    { status: 404 },
+  )
+}
+
+const { docs: categories } = await listCategories()
+
+// Lexical → plain text, so the tree round-trips through a <textarea>.
+const bodyText = lexicalToPlainParagraphs(post.content)
+---
+
+<Layout title={`Edit: ${post.title}`} subtitle="Pattern A · Astro Action → Payload PATCH" section="posts">
+  {
+    result?.error && (
+      <div class="notice error">
+        <p>{isInputError(result.error) ? 'Some fields need attention — see below.' : result.error.message}</p>
+      </div>
+    )
+  }
+
+  <div class="grid cols-2">
+    <div class="card">
+      <form method="POST" action={actions.post.update}>
+        {/* The Action's schema requires `id`; a hidden input is how a form supplies it. */}
+        <input type="hidden" name="id" value={post.id} />
+        <PostFormFields post={post} bodyText={bodyText} categories={categories} errors={fieldErrors} />
+        <div class="row">
+          <button class="btn primary" type="submit">Save changes</button>
+          <a class="btn" href="/posts">Cancel</a>
+          {post._status === 'published' && (
+            <a class="btn" href={`/posts/${post.slug}`}>
+              View live
+            </a>
+          )}
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Record</h3>
+      <table>
+        <tbody>
+          <tr><th>id</th><td class="mono">{post.id}</td></tr>
+          <tr><th>slug</th><td class="mono">{post.slug}</td></tr>
+          <tr><th>status</th><td><span class:list={['badge', post._status ?? 'draft']}>{post._status}</span></td></tr>
+          <tr><th>created</th><td class="small">{new Date(post.createdAt).toLocaleString('en-GB')}</td></tr>
+          <tr><th>updated</th><td class="small">{new Date(post.updatedAt).toLocaleString('en-GB')}</td></tr>
+        </tbody>
+      </table>
+      <p class="small muted" style="margin-top:12px;margin-bottom:0">
+        Saving sends <code>PATCH /api/posts/{post.id}</code>. Payload uses PATCH for updates; Medusa uses POST. The two
+        client modules in <code class="path">src/lib/</code> hide that difference from these pages.
+      </p>
+    </div>
+  </div>
+</Layout>

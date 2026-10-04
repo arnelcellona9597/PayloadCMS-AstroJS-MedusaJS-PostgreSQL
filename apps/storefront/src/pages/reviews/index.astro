@@ -1,0 +1,323 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import RatingStars from '../../components/RatingStars.astro'
+import ReviewFilter from '../../components/ReviewFilter.tsx'
+import { listProducts } from '../../lib/medusa'
+import { listAdminReviews } from '../../lib/medusa-admin'
+
+export const prerender = false
+
+/**
+ * Reviews — Pattern B, front to back.
+ *
+ * The READ here is a direct server-side call to `listAdminReviews` (fast, typed,
+ * no HTTP hop from this process to itself). The WRITES go through this app's own
+ * REST endpoints at /api/reviews/*, called with `fetch` from the small script at
+ * the bottom of this file.
+ *
+ * That split is deliberate and is the honest version of the pattern: server
+ * rendering reads directly, the browser talks to endpoints. Compare with
+ * /posts, where the Action handles both and needs no client script at all.
+ */
+const [{ reviews, count }, products] = await Promise.all([
+  listAdminReviews({ limit: 100, order: '-created_at' }),
+  listProducts(20),
+])
+
+const byStatus = {
+  approved: reviews.filter((r) => r.status === 'approved').length,
+  pending: reviews.filter((r) => r.status === 'pending').length,
+  rejected: reviews.filter((r) => r.status === 'rejected').length,
+}
+---
+
+<Layout
+  title="Reviews"
+  subtitle="Medusa owns these, in a custom module. CRUD runs through this app's own REST endpoints."
+  section="reviews"
+>
+  <div id="flash"></div>
+
+  <div class="row between" style="margin-bottom:20px">
+    <p class="muted small" style="margin:0">
+      {count} total · <span class="badge approved">{byStatus.approved}</span>
+      <span class="badge pending">{byStatus.pending}</span>
+      <span class="badge rejected">{byStatus.rejected}</span>
+    </p>
+    <a class="btn" href="#new-review">Write a review</a>
+  </div>
+
+  {/*
+    THE ONE ISLAND IN THIS APP.
+
+    `client:visible` hydrates it only when it scrolls into view, so the JavaScript
+    is not even downloaded for a visitor who never reaches this section. The other
+    directives, cheapest first:
+
+      client:idle     after the main thread is free
+      client:visible  when it enters the viewport   ← this one
+      client:load     immediately on page load
+      client:only     skip server rendering entirely (no HTML until JS runs)
+
+    The `reviews` prop is serialised into the HTML as JSON so the component has
+    its data without a second request. That is the trade: no fetch, but the
+    payload is in the document whether or not the island ever hydrates.
+
+    Measure the cost — see the comment in ReviewFilter.tsx.
+  */}
+  <section style="margin-bottom:28px">
+    <h2>Filter (client-side)</h2>
+    <p class="small muted" style="margin-top:0">
+      This one section is a React island. Everything else on this page is plain server-rendered
+      HTML — compare <a href="/posts">/posts</a>, which does full CRUD and ships zero JavaScript.
+    </p>
+    <div class="card">
+      <ReviewFilter
+        client:visible
+        reviews={reviews.map((r) => ({
+          id: r.id,
+          title: r.title,
+          content: r.content,
+          author_name: r.author_name,
+          rating: r.rating,
+          status: r.status,
+        }))}
+      />
+    </div>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Review</th>
+          <th>Rating</th>
+          <th>Status</th>
+          <th style="text-align:right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {
+          reviews.map((review) => (
+            <tr data-row={review.id}>
+              <td>
+                <strong>{review.title}</strong>
+                <div class="small muted">{review.content}</div>
+                <div class="small muted mono">
+                  {review.author_name}
+                  {review.author_email ? ` · ${review.author_email}` : ''}
+                </div>
+              </td>
+              <td><RatingStars rating={review.rating} /></td>
+              <td><span class:list={['badge', review.status]}>{review.status}</span></td>
+              <td class="actions-cell">
+                <div class="actions">
+                  {review.status !== 'approved' && (
+                    <button class="btn small" data-moderate={review.id} data-status="approved">
+                      Approve
+                    </button>
+                  )}
+                  {review.status !== 'rejected' && (
+                    <button class="btn small" data-moderate={review.id} data-status="rejected">
+                      Reject
+                    </button>
+                  )}
+                  <a class="btn small" href={`/reviews/${review.id}/edit`}>Edit</a>
+                  <button class="btn small danger" data-delete={review.id}>Delete</button>
+                </div>
+              </td>
+            </tr>
+          ))
+        }
+      </tbody>
+    </table>
+  </div>
+
+  {
+    reviews.length === 0 && (
+      <div class="notice info" style="margin-top:16px">
+        <p>
+          No reviews yet. Run <code class="path">npm run seed:reviews</code> in <code class="path">apps/commerce</code>,
+          or add one below.
+        </p>
+      </div>
+    )
+  }
+
+  <section id="new-review" style="margin-top:40px">
+    <h2>Write a review</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        {/*
+          A plain form POSTing to our own endpoint. It works without JavaScript —
+          the endpoint accepts form encoding as well as JSON — but the response is
+          then raw JSON rather than a redirect. The script below intercepts the
+          submit to give a nicer result. Contrast with an Action, which handles
+          the no-JS redirect for you.
+        */}
+        <form id="review-form" method="POST" action="/api/reviews">
+          <div class="field">
+            <label for="product_id">Product</label>
+            <select id="product_id" name="product_id" required>
+              {products.map((product) => <option value={product.id}>{product.title}</option>)}
+            </select>
+          </div>
+          <div class="field">
+            <label for="r-title">Title</label>
+            <input type="text" id="r-title" name="title" required minlength="3" maxlength="200" />
+            <span class="hint">At least 3 characters — enforced by zod twice, here and again in Medusa.</span>
+          </div>
+          <div class="field">
+            <label for="r-content">Review</label>
+            <textarea id="r-content" name="content" required minlength="10" maxlength="4000"></textarea>
+          </div>
+          <div class="field">
+            <label for="rating">Rating</label>
+            <select id="rating" name="rating" required>
+              <option value="5">5 — excellent</option>
+              <option value="4">4 — good</option>
+              <option value="3">3 — fine</option>
+              <option value="2">2 — poor</option>
+              <option value="1">1 — bad</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="author_name">Your name</label>
+            <input type="text" id="author_name" name="author_name" required maxlength="120" />
+          </div>
+          <div class="field">
+            <label for="author_email">Your email (optional)</label>
+            <input type="email" id="author_email" name="author_email" />
+          </div>
+          <button class="btn primary" type="submit">Submit review</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>What happens on submit</h3>
+        <ol class="small stack" style="padding-left:18px">
+          <li><code class="path">src/pages/api/reviews/index.ts</code> — our endpoint parses and validates.</li>
+          <li><code class="path">src/lib/medusa.ts</code> — adds <code>x-publishable-api-key</code>.</li>
+          <li>Medusa middleware validates the body AGAIN with its own zod schema.</li>
+          <li><code>createReviewWorkflow</code> runs: validate product → insert → link to product.</li>
+          <li>If the link step fails, the insert is compensated away. Nothing is left behind.</li>
+        </ol>
+        <p class="small muted">
+          The review lands as <span class="badge pending">pending</span> — Medusa's store validator does not accept a
+          <code>status</code> field, so a public caller cannot self-publish. Approve it from the table above.
+        </p>
+        <p class="small muted" style="margin-bottom:0">
+          Try the rollback: set <code>DEMO_FAIL_LINK_STEP=1</code> in <code class="path">apps/commerce/.env</code>,
+          restart it, and submit again.
+        </p>
+      </div>
+    </div>
+  </section>
+</Layout>
+
+<script>
+  /**
+   * The only client-side JavaScript in this app.
+   *
+   * It exists because Pattern B has no built-in progressive enhancement: a plain
+   * form POST to /api/reviews returns JSON, and HTML forms cannot issue DELETE or
+   * PATCH at all. So moderation and deletion need `fetch`.
+   *
+   * That asymmetry IS the lesson. The /posts pages achieve the same CRUD with no
+   * client script whatsoever, because Astro Actions handle the form lifecycle.
+   *
+   * Note what is NOT here: any API key. This talks only to same-origin endpoints;
+   * the credentials stay on the server.
+   */
+  const flash = document.getElementById('flash')!
+
+  function show(kind: 'success' | 'error', message: string) {
+    flash.innerHTML = `<div class="notice ${kind}"><p>${message}</p></div>`
+    flash.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+
+  async function readError(res: Response): Promise<string> {
+    try {
+      const body = await res.json()
+      const detail = body?.error?.detail
+      const fields = detail ? Object.entries(detail).map(([k, v]) => `${k}: ${v}`).join('; ') : ''
+      return [body?.error?.message, fields].filter(Boolean).join(' — ')
+    } catch {
+      return `Request failed with ${res.status}`
+    }
+  }
+
+  // ── moderate ──────────────────────────────────────────────────────────────
+  document.querySelectorAll<HTMLButtonElement>('[data-moderate]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.moderate!
+      const status = button.dataset.status!
+      button.disabled = true
+
+      const res = await fetch(`/api/reviews/${id}/moderate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+
+      if (res.ok) {
+        window.location.reload()
+      } else {
+        button.disabled = false
+        show('error', await readError(res))
+      }
+    })
+  })
+
+  // ── delete ────────────────────────────────────────────────────────────────
+  document.querySelectorAll<HTMLButtonElement>('[data-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.delete!
+
+      if (!confirm('Soft-delete this review? The row stays in Postgres with deleted_at set.')) {
+        return
+      }
+
+      button.disabled = true
+
+      // A real HTTP DELETE — possible here, impossible from an HTML form.
+      const res = await fetch(`/api/reviews/${id}`, { method: 'DELETE' })
+
+      if (res.ok) {
+        window.location.reload()
+      } else {
+        button.disabled = false
+        show('error', await readError(res))
+      }
+    })
+  })
+
+  // ── create ────────────────────────────────────────────────────────────────
+  const form = document.getElementById('review-form') as HTMLFormElement | null
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+
+    const submit = form.querySelector('button[type=submit]') as HTMLButtonElement
+    submit.disabled = true
+
+    const payload = Object.fromEntries(new FormData(form))
+
+    const res = await fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    submit.disabled = false
+
+    if (res.ok) {
+      const body = await res.json()
+      show('success', body.message ?? 'Review submitted.')
+      form.reset()
+      setTimeout(() => window.location.reload(), 1200)
+    } else {
+      show('error', await readError(res))
+    }
+  })
+</script>

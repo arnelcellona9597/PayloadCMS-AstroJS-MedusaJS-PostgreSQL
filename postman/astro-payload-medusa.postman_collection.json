@@ -1,0 +1,2281 @@
+{
+  "info": {
+    "_postman_id": "9f2a1c34-6b7d-4e58-9a10-3c5d7e8f0b21",
+    "name": "Astro + Payload + Medusa (Local)",
+    "description": "Full API surface for the astro-payload-medusa teaching stack.\n\nRUN ORDER MATTERS. Folder 00 captures the admin JWT; 02 captures a product id and creates a review; 03 and 04 reuse it. Use the Collection Runner (or Newman) top to bottom, or run 00 and 02 first if you want to click individual requests.\n\nRequires the 'Local (astro-payload-medusa)' environment. Regenerate its keys after `npm run db:reset` with `npm run postman:env`.\n\nNegative cases (400/401/403/404) are included on purpose - they are where this stack's architecture is most visible.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 Auth",
+      "item": [
+        {
+          "name": "Medusa - admin login (captures medusaJwt)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/auth/user/emailpass",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "auth",
+                "user",
+                "emailpass"
+              ]
+            },
+            "description": "Captures the admin JWT used by every /admin/* request. Run this first.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"returns a token\", () => pm.expect(body.token).to.be.a(\"string\").and.not.empty);",
+                  "pm.environment.set(\"medusaJwt\", body.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Payload - login (human session)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/users/login",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                "login"
+              ]
+            },
+            "description": "Optional. The Payload folder authenticates with the API-key header instead; this shows the human login path.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"returns the user\", () => pm.expect(body.user.email).to.eql(pm.environment.get(\"adminEmail\")));",
+                  "if (body.token) { pm.environment.set(\"payloadJwt\", body.token); }"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Run first - later folders depend on the captured token."
+    },
+    {
+      "name": "01 Payload CMS",
+      "item": [
+        {
+          "name": "Posts - list (anonymous)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts?limit=50&depth=0",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "No credentials. Payload's read access rule returns a Where query, so drafts are filtered out - the request still succeeds with 200."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.environment.set(\"anonPostCount\", body.totalDocs);",
+                  "pm.test(\"no drafts leak to anonymous callers\", () =>",
+                  "  pm.expect(body.docs.filter(d => d._status === \"draft\")).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - list with API key (drafts appear)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts?limit=50&depth=0",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Same URL, same handler. The key changes what access control RETURNS, not whether the request is allowed."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const anon = Number(pm.environment.get(\"anonPostCount\"));",
+                  "pm.test(\"access control filters rather than rejects\", () =>",
+                  "  pm.expect(body.totalDocs).to.be.above(anon));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - filter where[title][contains]",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts?where[title][contains]=CRUD&depth=0",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ],
+              "query": [
+                {
+                  "key": "where[title][contains]",
+                  "value": "CRUD"
+                },
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Postman needs no escaping for bracket syntax (curl needs -g)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"every result matches the filter\", () =>",
+                  "  pm.response.json().docs.forEach(d => pm.expect(d.title).to.include(\"CRUD\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - create WITHOUT key (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ]
+            },
+            "description": "create access requires a user. 403 not 401 - the request is well-formed, just not permitted.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"This must be rejected\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"403 Forbidden\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Created from Postman\",\n  \"excerpt\": \"The slug is derived by a beforeValidate field hook.\",\n  \"_status\": \"published\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+                  "const doc = pm.response.json().doc;",
+                  "pm.test(\"slug was auto-derived\", () => pm.expect(doc.slug).to.eql(\"created-from-postman\"));",
+                  "pm.environment.set(\"postId\", doc.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - read one",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/{{postId}}?depth=1",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "{{postId}}"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"is the post we created\", () =>",
+                  "  pm.expect(pm.response.json().title).to.eql(\"Created from Postman\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - update (PATCH - Payload's verb)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/{{postId}}",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": "Payload uses PATCH. Medusa's admin API uses POST for the same operation - compare folder 03.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Renamed from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const doc = pm.response.json().doc;",
+                  "pm.test(\"title changed\", () => pm.expect(doc.title).to.eql(\"Renamed from Postman\"));",
+                  "pm.test(\"slug did NOT change\", () => pm.expect(doc.slug).to.eql(\"created-from-postman\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - count",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/count",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "count"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"returns a number\", () => pm.expect(pm.response.json().totalDocs).to.be.a(\"number\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - stats (anonymous)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/stats",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "stats"
+              ]
+            },
+            "description": "Hand-written endpoint using Payload's Local API with overrideAccess:false, so an anonymous caller counts 0 drafts."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"anonymous sees no drafts\", () => pm.expect(b.counts.drafts).to.eql(0));",
+                  "pm.test(\"not authenticated\", () => pm.expect(b.authenticatedAs).to.eql(null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - stats (with API key)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/stats",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "stats"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"caller is identified\", () =>",
+                  "  pm.expect(b.authenticatedAs.email).to.eql(pm.environment.get(\"adminEmail\")));",
+                  "pm.test(\"drafts are visible\", () => pm.expect(b.counts.drafts).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Categories - list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{payloadUrl}}/api/categories?limit=100&sort=name",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100"
+                },
+                {
+                  "key": "sort",
+                  "value": "name"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"seeded categories exist\", () => pm.expect(pm.response.json().totalDocs).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posts - delete (cleanup)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/{{postId}}",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": "delete requires role=admin - stricter than update."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.environment.unset(\"postId\");"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Everything except /posts/stats is generated from a collection config file."
+    },
+    {
+      "name": "02 Medusa Store",
+      "item": [
+        {
+          "name": "Reviews - list WITHOUT publishable key (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews"
+              ]
+            },
+            "description": "Every /store/* route needs x-publishable-api-key - custom routes included. The most common wall with a Medusa storefront."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 Bad Request\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"explains the missing header\", () =>",
+                  "  pm.expect(pm.response.json().message).to.include(\"Publishable API key required\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Products - list (captures productId)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/products?limit=5&fields=id,title,handle",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "fields",
+                  "value": "id,title,handle"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const products = pm.response.json().products;",
+                  "pm.test(\"key is scoped to a sales channel (products returned)\", () =>",
+                  "  pm.expect(products.length).to.be.above(0));",
+                  "pm.environment.set(\"productId\", products[0].id);",
+                  "pm.environment.set(\"productHandle\", products[0].handle);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - list (approved only)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews?limit=50&order=-created_at",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "order",
+                  "value": "-created_at"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"author_email is never exposed publicly\", () =>",
+                  "  b.reviews.forEach(r => pm.expect(r).to.not.have.property(\"author_email\")));",
+                  "pm.environment.set(\"storeReviewCount\", b.count);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - create: validation failure (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews"
+              ]
+            },
+            "description": "Three problems at once. Medusa's zod layer reports them all, before any handler runs.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"title\": \"no\",\n  \"content\": \"short\",\n  \"rating\": 9,\n  \"author_name\": \"T\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 Bad Request\", () => pm.response.to.have.status(400));",
+                  "const msg = pm.response.json().message;",
+                  "pm.test(\"reports every failing field\", () => {",
+                  "  pm.expect(msg).to.include(\"title\");",
+                  "  pm.expect(msg).to.include(\"content\");",
+                  "  pm.expect(msg).to.include(\"rating\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - create: unknown field rejected (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews"
+              ]
+            },
+            "description": "A security control, not a typo check: without .strict() the field would be silently dropped.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"title\": \"Trying to self-approve\",\n  \"content\": \"The store schema is strict, so this is refused.\",\n  \"rating\": 5,\n  \"author_name\": \"Sneaky\",\n  \"status\": \"approved\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 Bad Request\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"names the unrecognized field\", () =>",
+                  "  pm.expect(pm.response.json().message).to.include(\"status\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - create: nonexistent product (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews"
+              ]
+            },
+            "description": "Passes zod, then fails validateProductStep - a business rule, not a schema rule.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"prod_does_not_exist\",\n  \"title\": \"Ghost product\",\n  \"content\": \"Rejected by the workflow's first step.\",\n  \"rating\": 4,\n  \"author_name\": \"Tester\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 Not Found\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"comes from the workflow step\", () =>",
+                  "  pm.expect(pm.response.json().message).to.include(\"does not exist\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - create (valid, lands pending)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"title\": \"Posted from Postman\",\n  \"content\": \"Created through createReviewWorkflow and linked to the product.\",\n  \"rating\": 5,\n  \"author_name\": \"Postman Runner\",\n  \"author_email\": \"postman@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"lands as pending - a public caller cannot self-publish\", () =>",
+                  "  pm.expect(b.review.status).to.eql(\"pending\"));",
+                  "pm.environment.set(\"reviewId\", b.review.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - read one: pending is 404 publicly",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews/{{reviewId}}",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            },
+            "description": "404 not 403: telling an anonymous caller 'this exists but you may not see it' leaks information for no benefit."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 Not Found (still pending)\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Product reviews - THROUGH the link table",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/products/{{productId}}/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "products",
+                "{{productId}}",
+                "reviews"
+              ]
+            },
+            "description": "query.graph resolves reviews across a module boundary via the link table in src/links/product-review.ts. No SQL join is possible."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"returns aggregate stats\", () => pm.expect(b.stats).to.have.property(\"average\"));",
+                  "pm.test(\"approved only - the route filters, the link table does not\", () =>",
+                  "  b.reviews.forEach(r => pm.expect(r).to.not.have.property(\"status\")));",
+                  "pm.test(\"no author_email across the boundary\", () =>",
+                  "  b.reviews.forEach(r => pm.expect(r).to.not.have.property(\"author_email\")));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "x-publishable-api-key is required on every request in this folder."
+    },
+    {
+      "name": "03 Medusa Admin",
+      "item": [
+        {
+          "name": "Reviews - list WITHOUT auth (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews"
+              ]
+            },
+            "description": "The publishable key is not enough. /admin/* needs an authenticated admin - and you write none of that check; it comes from the path."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 Unauthorized\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - list (all statuses)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews?limit=50&order=-created_at",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "order",
+                  "value": "-created_at"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const store = Number(pm.environment.get(\"storeReviewCount\"));",
+                  "pm.test(\"admin sees more than the store surface\", () => pm.expect(b.count).to.be.above(store));",
+                  "pm.test(\"author_email IS included for admins\", () =>",
+                  "  pm.expect(b.reviews[0]).to.have.property(\"author_email\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - filter status=pending",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews?status=pending&limit=50",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "pending"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"only pending returned\", () =>",
+                  "  pm.response.json().reviews.forEach(r => pm.expect(r.status).to.eql(\"pending\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - search q=Postman",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews?q=Postman&limit=20",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "Postman"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "ILIKE across title, content and author_name."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"finds the review we created\", () => pm.expect(pm.response.json().count).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - read one",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews/{{reviewId}}",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"full record including author_email\", () =>",
+                  "  pm.expect(pm.response.json().review).to.have.property(\"author_email\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - update with EMPTY body (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews/{{reviewId}}",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            },
+            "description": "zod .refine() rejects it. A silent no-op would read as a bug at the call site.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 Bad Request\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"explains why\", () =>",
+                  "  pm.expect(pm.response.json().message.toLowerCase()).to.include(\"at least one field\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - approve (POST, not PATCH)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews/{{reviewId}}",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            },
+            "description": "Medusa's admin convention is POST for updates. Payload used PATCH in folder 01.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"approved\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"now approved\", () => pm.expect(pm.response.json().review.status).to.eql(\"approved\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - now visible on the STORE surface",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-publishable-api-key",
+                "value": "{{medusaPublishableKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/store/reviews/{{reviewId}}",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "store",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            },
+            "description": "Approving is all it takes - the store routes filter on status at read time."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK - was 404 before approval\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"is our review\", () =>",
+                  "  pm.expect(pm.response.json().review.title).to.eql(\"Posted from Postman\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - delete (SOFT)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/reviews/{{reviewId}}",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            },
+            "description": "The row stays in Postgres with deleted_at set, which makes the delete workflow's compensation a single restoreReviews call."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"reports deleted\", () => pm.expect(pm.response.json().deleted).to.eql(true));",
+                  "pm.environment.unset(\"reviewId\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Uptime - history and incidents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/uptime?hours=24",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "uptime"
+              ],
+              "query": [
+                {
+                  "key": "hours",
+                  "value": "24"
+                }
+              ]
+            },
+            "description": "Uptime history, recorded every minute by a scheduled job inside Medusa.\n\nMeasured from OUTSIDE each service, because a service cannot credibly report that it is down.\n\nNote the `monitoring` flag: no data and healthy data must not look alike."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "",
+                  "// `monitoring` distinguishes \"measured and healthy\" from \"never measured\".",
+                  "// An empty targets array with monitoring:false is NOT 100% uptime.",
+                  "pm.test(\"states whether it has ever measured anything\", () =>",
+                  "  pm.expect(b).to.have.property(\"monitoring\"));",
+                  "",
+                  "if (!b.monitoring) {",
+                  "  pm.test(\"explains the empty result instead of implying health\", () =>",
+                  "    pm.expect(b.note).to.be.a(\"string\"));",
+                  "} else {",
+                  "  pm.test(\"one entry per monitored target\", () =>",
+                  "    pm.expect(b.targets.length).to.be.above(0));",
+                  "  pm.test(\"each target reports a percentage and a latency\", () => {",
+                  "    b.targets.forEach((t) => {",
+                  "      pm.expect(t).to.have.property(\"uptimePercent\");",
+                  "      pm.expect(t).to.have.property(\"avgLatencyMs\");",
+                  "    });",
+                  "  });",
+                  "  pm.environment.set(\"uptimeTargets\", b.targets.length);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Workflows - executions by state",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{medusaJwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{medusaUrl}}/admin/workflows?limit=20",
+              "host": [
+                "{{medusaUrl}}"
+              ],
+              "path": [
+                "admin",
+                "workflows"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Workflow executions grouped by state \u2014 the real successful/pending/failed.\n\nRequires BOTH the Redis workflow engine and `{ store: true, retentionTime }` on the workflow. Miss either and this returns an empty list that reads as 'nothing failed'.\n\nRun `npm run test:compensation` first to produce a `reverted` execution."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "",
+                  "pm.test(\"says whether anything is retained\", () =>",
+                  "  pm.expect(b).to.have.property(\"retaining\"));",
+                  "",
+                  "// This endpoint returns an empty list on a default Medusa install: the",
+                  "// in-memory workflow engine never writes to workflow_execution. An empty",
+                  "// failure count then looks exactly like good news.",
+                  "if (!b.retaining) {",
+                  "  pm.test(\"explains the empty list rather than reporting zero failures\", () =>",
+                  "    pm.expect(b.note).to.include(\"retentionTime\"));",
+                  "} else {",
+                  "  pm.test(\"four buckets are reported\", () => {",
+                  "    [\"successful\", \"pending\", \"reverted\", \"failed\"].forEach((k) =>",
+                  "      pm.expect(b.counts).to.have.property(k));",
+                  "  });",
+                  "",
+                  "  // reverted = failed AND rolled back cleanly. failed = could not roll back.",
+                  "  // Collapsing them loses the only distinction worth alerting on.",
+                  "  pm.test(\"reverted is counted separately from failed\", () =>",
+                  "    pm.expect(b.counts.reverted).to.not.equal(undefined) &&",
+                  "    pm.expect(b.counts.failed).to.not.equal(undefined));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Requires the JWT captured in folder 00."
+    },
+    {
+      "name": "04 Astro BFF",
+      "item": [
+        {
+          "name": "Health - both backends",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/health",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "200 when both are reachable, 503 otherwise - usable as a readiness probe."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"both backends reachable\", () => {",
+                  "  pm.expect(b.services.payload.ok).to.eql(true);",
+                  "  pm.expect(b.services.medusa.ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - list (store surface)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews?limit=5",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "No credential sent by the caller. Astro adds the publishable key server-side - the whole point of a BFF."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"served from the store surface\", () =>",
+                  "  pm.expect(pm.response.json().source).to.eql(\"store\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - list (admin surface via include_pending)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews?include_pending=true&limit=5",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "include_pending",
+                  "value": "true"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": "Composition no single Medusa route offers: one endpoint, two upstream surfaces."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"switched to the admin surface\", () =>",
+                  "  pm.expect(pm.response.json().source).to.eql(\"admin\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - create (JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{productId}}\",\n  \"title\": \"Created through the BFF\",\n  \"content\": \"The client sent no API key at all.\",\n  \"rating\": 4,\n  \"author_name\": \"Postman Runner\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"201 Created\", () => pm.response.to.have.status(201));",
+                  "pm.environment.set(\"bffReviewId\", pm.response.json().review.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - create: validation (422 with field detail)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews"
+              ]
+            },
+            "description": "The BFF reshapes Medusa's single concatenated message into per-field detail, which is what a UI needs to highlight inputs.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"x\",\n  \"title\": \"no\",\n  \"content\": \"short\",\n  \"rating\": 11,\n  \"author_name\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422 Unprocessable\", () => pm.response.to.have.status(422));",
+                  "const d = pm.response.json().error.detail;",
+                  "pm.test(\"per-field detail\", () => {",
+                  "  pm.expect(d).to.have.property(\"title\");",
+                  "  pm.expect(d).to.have.property(\"rating\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - read one (admin surface)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews/{{bffReviewId}}?admin=true",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews",
+                "{{bffReviewId}}"
+              ],
+              "query": [
+                {
+                  "key": "admin",
+                  "value": "true"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"from the admin surface\", () => pm.expect(pm.response.json().source).to.eql(\"admin\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - PATCH (translated to Medusa's POST)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews/{{bffReviewId}}",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews",
+                "{{bffReviewId}}"
+              ]
+            },
+            "description": "The caller uses the verb it expects; the BFF translates. That translation is why src/lib/ exists.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Renamed via the BFF\",\n  \"status\": \"approved\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().review;",
+                  "pm.test(\"renamed and approved\", () => {",
+                  "  pm.expect(r.title).to.eql(\"Renamed via the BFF\");",
+                  "  pm.expect(r.status).to.eql(\"approved\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - moderate (an intent, not a column write)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews/{{bffReviewId}}/moderate",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews",
+                "{{bffReviewId}}",
+                "moderate"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"rejected\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"moderated\", () => pm.expect(pm.response.json().status).to.eql(\"rejected\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - DELETE without Origin (403 CSRF)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews/{{bffReviewId}}",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews",
+                "{{bffReviewId}}"
+              ]
+            },
+            "description": "Astro's CSRF check. Browsers send Origin automatically; API clients must add it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"403 Forbidden\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"names the reason\", () => pm.expect(pm.response.text()).to.include(\"Cross-site\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reviews - DELETE with Origin (cleanup)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{astroUrl}}"
+              }
+            ],
+            "url": {
+              "raw": "{{astroUrl}}/api/reviews/{{bffReviewId}}",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "reviews",
+                "{{bffReviewId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.environment.unset(\"bffReviewId\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action - create a post with no JavaScript",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "{{astroUrl}}"
+              }
+            ],
+            "url": {
+              "raw": "{{astroUrl}}/posts/new?_action=post.create",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "posts",
+                "new"
+              ],
+              "query": [
+                {
+                  "key": "_action",
+                  "value": "post.create"
+                }
+              ]
+            },
+            "description": "Astro Actions are reached at ?_action=<name> on the page that renders the form - exactly what a browser submits with JavaScript disabled. Needs Origin.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "title",
+                  "value": "Created by a Postman form POST",
+                  "type": "text"
+                },
+                {
+                  "key": "body",
+                  "value": "Proves Astro Actions work without a browser.",
+                  "type": "text"
+                },
+                {
+                  "key": "status",
+                  "value": "published",
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// With 'Automatically follow redirects' ON (the default) you get the 200 list page;",
+                  "// switch it OFF in Settings to see the raw 302.",
+                  "pm.test(\"Action ran (302, or 200 after following the redirect)\", () =>",
+                  "  pm.expect([200, 302]).to.include(pm.response.code));",
+                  "if (pm.response.code === 302) {",
+                  "  pm.test(\"redirects to /posts?created=\", () =>",
+                  "    pm.expect(pm.response.headers.get(\"location\")).to.include(\"created=\"));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action - clean up that post",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts?where[slug][equals]=created-by-a-postman-form-post&depth=0",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ],
+              "query": [
+                {
+                  "key": "where[slug][equals]",
+                  "value": "created-by-a-postman-form-post"
+                },
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "Finds the post the Action created so the next request can delete it."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const docs = pm.response.json().docs;",
+                  "if (docs.length) {",
+                  "  pm.environment.set(\"actionPostId\", docs[0].id);",
+                  "} else {",
+                  "  pm.environment.unset(\"actionPostId\");",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Action - delete that post (cleanup)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "users API-Key {{payloadApiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{payloadUrl}}/api/posts/{{actionPostId}}",
+              "host": [
+                "{{payloadUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "{{actionPostId}}"
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.environment.get(\"actionPostId\")) {",
+                  "  console.log(\"actionPostId not set - nothing to clean up.\");",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"cleaned up (200) or already gone (404)\", () =>",
+                  "  pm.expect([200, 404]).to.include(pm.response.code));",
+                  "pm.environment.unset(\"actionPostId\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Monitor - request log summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/monitor?limit=20",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "monitor"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "In-process ring buffer of recent requests, recorded by Astro middleware.\n\nTwo deliberate exclusions, from one list in src/middleware.ts: this path is exempt from the request LOG (so polling does not fill the buffer with itself) and from the RATE LIMITER (so the monitor does not go dark under the flood you opened it to investigate).\n\nBlind spot: it cannot see anything rejected before middleware runs \u2014 including Astro's own 403 origin check."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "",
+                  "pm.test(\"reports totals by status class\", () => {",
+                  "  [\"2xx\", \"3xx\", \"4xx\", \"5xx\"].forEach((k) =>",
+                  "    pm.expect(b.summary.byClass).to.have.property(k));",
+                  "});",
+                  "",
+                  "pm.test(\"reports p50 and p95, not just a mean\", () => {",
+                  "  pm.expect(b.summary).to.have.property(\"p50Ms\");",
+                  "  pm.expect(b.summary).to.have.property(\"p95Ms\");",
+                  "});",
+                  "",
+                  "// The endpoint must not appear in its own buffer, or polling it would",
+                  "// fill the log with records of the act of reading the log.",
+                  "pm.test(\"excludes itself from the log it returns\", () =>",
+                  "  pm.expect(b.requests.filter((r) => r.path.startsWith(\"/api/monitor\")).length).to.eql(0));",
+                  "",
+                  "pm.test(\"admits it is in-memory and per-process\", () =>",
+                  "  pm.expect(b.caveat).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logs - errors and warnings only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{astroUrl}}/api/logs?level=warn&limit=20",
+              "host": [
+                "{{astroUrl}}"
+              ],
+              "path": [
+                "api",
+                "logs"
+              ],
+              "query": [
+                {
+                  "key": "level",
+                  "value": "warn"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Tails the three services' logs and normalises them to one shape.\n\nTwo formats: Astro writes JSON-lines with a real `level`, while Payload and Medusa print text whose level has to be GUESSED from the words in the line. That asymmetry is the argument for structured logging.\n\nDev-only: it reads the local filesystem, which works only because all three services share a machine."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "",
+                  "pm.test(\"reports which services it could read\", () => {",
+                  "  pm.expect(b).to.have.property(\"sources\");",
+                  "  pm.expect(b).to.have.property(\"missing\");",
+                  "});",
+                  "",
+                  "// level=warn means \"warn AND above\", so info must not appear.",
+                  "pm.test(\"level=warn excludes info and debug\", () => {",
+                  "  const levels = b.lines.map((l) => l.level);",
+                  "  pm.expect(levels).to.not.include(\"info\");",
+                  "  pm.expect(levels).to.not.include(\"debug\");",
+                  "});",
+                  "",
+                  "pm.test(\"counts cover all levels, not just the filtered ones\", () => {",
+                  "  [\"error\", \"warn\", \"info\", \"debug\"].forEach((k) =>",
+                  "    pm.expect(b.counts).to.have.property(k));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "This app's own API. No credentials are sent by the caller on any of these."
+    }
+  ],
+  "variable": [
+    {
+      "key": "payloadUrl",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "medusaUrl",
+      "value": "http://localhost:9000",
+      "type": "string"
+    },
+    {
+      "key": "astroUrl",
+      "value": "http://localhost:4321",
+      "type": "string"
+    }
+  ]
+}

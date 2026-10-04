@@ -1,0 +1,121 @@
+---
+/**
+ * Ordered magnitude across a few categories — a horizontal bar chart.
+ *
+ * Design decisions worth stating, because each has a wrong version:
+ *
+ * • **Horizontal, not vertical.** The category labels ("5 ★") sit left-aligned
+ *   and read without rotation. Rotated x-axis labels are a smell.
+ *
+ * • **One hue, not five.** This is a single series. Giving each bar its own
+ *   colour would imply five identities that do not exist, and colour would be
+ *   encoding nothing the label does not already say.
+ *
+ * • **Direct labels, no axis.** Five rows do not need a grid and a value axis;
+ *   the count sits at the end of its own bar. A gridline here would be chrome.
+ *
+ * • **Rounded data-end only.** The bar is anchored flush to the baseline at its
+ *   origin and rounded at the value end, so length stays honest.
+ *
+ * • **The zero case is drawn.** A rating with no reviews renders an empty track
+ *   rather than vanishing — a missing row reads as missing data, not as zero.
+ */
+interface Props {
+  title?: string
+  rows: { label: string; value: number }[]
+  /** Rendered after each value, e.g. "reviews". */
+  unit?: string
+  emptyMessage?: string
+}
+
+const { title, rows, unit, emptyMessage = 'No data yet.' } = Astro.props
+
+const max = Math.max(1, ...rows.map((r) => r.value))
+const total = rows.reduce((sum, r) => sum + r.value, 0)
+---
+
+<figure class="dist">
+  {title && <figcaption class="dist-title">{title}</figcaption>}
+
+  {
+    total === 0 ? (
+      <p class="dist-empty">{emptyMessage}</p>
+    ) : (
+      <div class="dist-rows">
+        {rows.map((row) => (
+          <div class="dist-row">
+            <span class="dist-label">{row.label}</span>
+            <span class="dist-track">
+              <span class="dist-fill" style={`width: ${(row.value / max) * 100}%`}></span>
+            </span>
+            <span class="dist-value">
+              {row.value}
+              {unit && <span class="dist-unit"> {unit}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+</figure>
+
+<style>
+  .dist { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+
+  .dist-title {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .dist-empty { margin: 0; font-size: 13px; color: var(--text-muted); }
+
+  .dist-rows { display: flex; flex-direction: column; gap: 8px; }
+
+  .dist-row {
+    display: grid;
+    grid-template-columns: 3.2rem 1fr auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dist-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* The track shows the full domain, so a short bar reads as "few", not as a
+     rendering glitch. */
+  .dist-track {
+    position: relative;
+    display: block;
+    height: 10px;
+    background: var(--surface-2);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .dist-fill {
+    display: block;
+    height: 100%;
+    background: var(--amber);
+    /* Flush at the origin, rounded at the data end. */
+    border-radius: 0 5px 5px 0;
+    min-width: 2px;
+  }
+
+  .dist-value {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .dist-unit { color: var(--text-muted); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .dist-fill { transition: width 240ms ease-out; }
+  }
+</style>

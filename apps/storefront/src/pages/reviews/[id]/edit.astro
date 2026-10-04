@@ -1,0 +1,154 @@
+---
+import Layout from '../../../layouts/Layout.astro'
+import { getAdminReview } from '../../../lib/medusa-admin'
+import type { AdminReview } from '../../../lib/types'
+
+export const prerender = false
+
+/**
+ * Edit a review — Pattern B's write path, without JavaScript.
+ *
+ * Two things worth noticing.
+ *
+ * 1. The POST is handled by THIS PAGE, not by an endpoint. An Astro page can
+ *    export nothing but still receive a POST: `Astro.request.method` tells you
+ *    which it is. That is the hand-rolled equivalent of what an Action does for
+ *    you automatically, and writing it out once makes the comparison concrete.
+ *
+ * 2. The form uses POST, and this page then calls our PATCH endpoint internally.
+ *    HTML forms cannot issue PATCH — so somebody has to translate. With Actions
+ *    that translation is invisible; here it is these ten lines.
+ */
+const { id } = Astro.params
+
+let saveError: string | null = null
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData()
+
+  const body: Record<string, unknown> = {
+    title: form.get('title'),
+    content: form.get('content'),
+    rating: Number(form.get('rating')),
+    author_name: form.get('author_name'),
+    status: form.get('status'),
+  }
+
+  const email = form.get('author_email')
+  if (typeof email === 'string' && email.trim() !== '') {
+    body.author_email = email.trim()
+  }
+
+  // Same-origin call into our own BFF endpoint, which translates PATCH → POST
+  // for Medusa. `new URL` keeps it working on any host/port.
+  const res = await fetch(new URL(`/api/reviews/${id}`, Astro.url), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  if (res.ok) {
+    return Astro.redirect('/reviews?updated=' + id)
+  }
+
+  const errorBody = (await res.json().catch(() => null)) as { error?: { message?: string; detail?: unknown } } | null
+  const detail = errorBody?.error?.detail
+  saveError =
+    [errorBody?.error?.message, detail ? JSON.stringify(detail) : null].filter(Boolean).join(' — ') ||
+    `Update failed with ${res.status}`
+}
+
+// Load AFTER the POST branch above, so a successful save is reflected on screen
+// and a failed one re-renders the stored values next to the error.
+let review: AdminReview
+
+try {
+  const result = await getAdminReview(id!)
+  review = result.review
+} catch (error) {
+  // Returning here rather than setting a flag keeps `review` non-nullable for
+  // the rest of the file — no `review!` assertions in the template below.
+  return new Response(
+    // MedusaAdminError extends Error and already carries a useful message.
+    error instanceof Error ? error.message : 'Could not load the review.',
+    { status: 404 },
+  )
+}
+
+---
+
+<Layout title={`Edit: ${review.title}`} subtitle="Pattern B · form POST → our PATCH endpoint → Medusa POST" section="reviews">
+  {
+    saveError && (
+      <div class="notice error">
+        <p>{saveError}</p>
+      </div>
+    )
+  }
+
+  <div class="grid cols-2">
+    <div class="card">
+      {/* No `action` attribute: posts back to this same URL. */}
+      <form method="POST">
+        <div class="field">
+          <label for="title">Title</label>
+          <input type="text" id="title" name="title" value={review.title} required minlength="3" maxlength="200" />
+        </div>
+        <div class="field">
+          <label for="content">Review</label>
+          <textarea id="content" name="content" required minlength="10" maxlength="4000">{review.content}</textarea>
+        </div>
+        <div class="field">
+          <label for="rating">Rating</label>
+          <select id="rating" name="rating">
+            {[5, 4, 3, 2, 1].map((n) => <option value={n} selected={review.rating === n}>{n}</option>)}
+          </select>
+        </div>
+        <div class="field">
+          <label for="author_name">Author</label>
+          <input type="text" id="author_name" name="author_name" value={review.author_name} required maxlength="120" />
+        </div>
+        <div class="field">
+          <label for="author_email">Author email</label>
+          <input type="email" id="author_email" name="author_email" value={review.author_email ?? ''} />
+        </div>
+        <div class="field">
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            {['pending', 'approved', 'rejected'].map((s) => (
+              <option value={s} selected={review.status === s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <span class="hint">
+            Only the admin surface may set this. The store validator rejects a <code>status</code> field outright.
+          </span>
+        </div>
+        <div class="row">
+          <button class="btn primary" type="submit">Save changes</button>
+          <a class="btn" href="/reviews">Cancel</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Record</h3>
+      <table>
+        <tbody>
+          <tr><th>id</th><td class="mono">{review.id}</td></tr>
+          <tr><th>status</th><td><span class:list={['badge', review.status]}>{review.status}</span></td></tr>
+          <tr><th>created</th><td class="small">{new Date(review.created_at).toLocaleString('en-GB')}</td></tr>
+          <tr><th>updated</th><td class="small">{new Date(review.updated_at).toLocaleString('en-GB')}</td></tr>
+        </tbody>
+      </table>
+      <h3 style="margin-top:20px">Rollback on update</h3>
+      <p class="small muted" style="margin-bottom:0">
+        Saving runs <code>updateReviewWorkflow</code>. Its single step snapshots the previous value of every field it is
+        about to overwrite, so a later failure can write them back — see
+        <code class="path">apps/commerce/src/workflows/steps/update-review.ts</code>. Undoing an update is strictly
+        harder than undoing an insert, and that file is where the difference lives.
+      </p>
+    </div>
+  </div>
+</Layout>

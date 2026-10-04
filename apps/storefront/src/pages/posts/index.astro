@@ -1,0 +1,177 @@
+---
+import { actions, isInputError } from 'astro:actions'
+
+import Layout from '../../layouts/Layout.astro'
+import { imageUrl } from '../../lib/types'
+import { listPosts } from '../../lib/payload'
+
+export const prerender = false
+
+/**
+ * Posts list — READ and DELETE.
+ *
+ * ── How an Action result reaches this page ─────────────────────────────────
+ * The delete form below posts to `actions.post.delete`. Astro runs the handler,
+ * then re-renders THIS page with the result retrievable via
+ * `Astro.getActionResult(...)`. No client-side JavaScript is involved, which is
+ * why the delete button works with JS switched off.
+ *
+ * `includeDrafts: true` sends the API key, so drafts appear. Reload
+ * http://localhost:3000/api/posts in a browser (no key) and the draft is missing
+ * — same data, different access rules.
+ */
+const deleteResult = Astro.getActionResult(actions.post.delete)
+
+const { docs: posts, totalDocs } = await listPosts({
+  limit: 50,
+  depth: 1,
+  includeDrafts: true,
+  sort: '-updatedAt',
+})
+
+const fmt = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+---
+
+<Layout
+  title="Posts"
+  subtitle="Payload owns these. CRUD runs through Astro Actions — see src/actions/index.ts."
+  section="posts"
+>
+  {
+    deleteResult && !deleteResult.error && (
+      <div class="notice success">
+        <p>Post {deleteResult.data.id} deleted.</p>
+      </div>
+    )
+  }
+  {
+    deleteResult?.error && (
+      <div class="notice error">
+        <p>
+          Could not delete: {deleteResult.error.message}
+          {isInputError(deleteResult.error) && ' (invalid input)'}
+        </p>
+      </div>
+    )
+  }
+
+  <div class="row between" style="margin-bottom:20px">
+    <p class="muted small" style="margin:0">
+      {totalDocs} posts, drafts included (this page sends the API key).
+    </p>
+    <a class="btn primary" href="/posts/new">New post</a>
+  </div>
+
+  {
+    posts.length === 0 ? (
+      <div class="notice info">
+        <p>
+          No posts yet. Run <code class="path">npm run seed</code> in <code class="path">apps/cms</code>, or create one
+          above.
+        </p>
+      </div>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Category</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th style="text-align:right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {posts.map((post) => (
+              <tr>
+                <td>
+                  <div class="title-cell">
+                    {/* depth:1 on the list query is what makes this a URL rather than an id. */}
+                    {imageUrl(post.coverImage, 'thumbnail') && (
+                      <img
+                        class="thumb"
+                        src={imageUrl(post.coverImage, 'thumbnail')}
+                        alt=""
+                        width="80"
+                        height="45"
+                        loading="lazy"
+                      />
+                    )}
+                    <div>
+                      <strong>{post.title}</strong>
+                      <div class="small muted mono">/{post.slug}</div>
+                      {post.excerpt && <div class="small muted">{post.excerpt}</div>}
+                    </div>
+                  </div>
+                </td>
+                <td class="small">
+                  {post.category && typeof post.category === 'object' ? post.category.name : <span class="muted">—</span>}
+                </td>
+                <td>
+                  <span class:list={['badge', post._status ?? 'draft']}>{post._status ?? 'draft'}</span>
+                </td>
+                <td class="small muted">{fmt(post.updatedAt)}</td>
+                <td class="actions-cell">
+                  <div class="actions">
+                    {post._status === 'published' && (
+                      <a class="btn small" href={`/posts/${post.slug}`}>
+                        View
+                      </a>
+                    )}
+                    <a class="btn small" href={`/posts/${post.id}/edit`}>
+                      Edit
+                    </a>
+                    {/*
+                      A form, not a link — HTML forms can only GET or POST, and a
+                      GET link would let a crawler delete the post. The Action is
+                      what makes this both safe and typed.
+                    */}
+                    <form method="POST" action={actions.post.delete} style="display:inline">
+                      <input type="hidden" name="id" value={post.id} />
+                      <button class="btn small danger" type="submit">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  <div class="card" style="margin-top:28px">
+    <h3>What just happened</h3>
+    <p class="small muted" style="margin-bottom:8px">
+      Every row above came from one request in this page's frontmatter:
+    </p>
+    <p class="mono small">
+      GET http://localhost:3000/api/posts?limit=50&depth=1&sort=-updatedAt<br />
+      Authorization: users API-Key ••••••••
+    </p>
+    <p class="small muted" style="margin-bottom:0">
+      Payload generated that endpoint from <code class="path">apps/cms/src/collections/Posts.ts</code>. No controller was
+      written on either side.
+    </p>
+  </div>
+</Layout>
+
+<style>
+  .title-cell {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  /* Fixed box so rows keep the same height whether or not a post has a cover. */
+  .thumb {
+    flex: 0 0 auto;
+    width: 80px;
+    height: 45px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+</style>

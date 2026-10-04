@@ -1,0 +1,843 @@
+---
+import { resolve } from 'node:path'
+
+import Layout from '../layouts/Layout.astro'
+import StatTile from '../components/StatTile.astro'
+import DistributionBar from '../components/DistributionBar.astro'
+
+import { getUptime, getWorkflows } from '../lib/medusa-admin'
+import { summary as requestSummary, query as requestQuery } from '../lib/request-log'
+import { readLogs, type LogLevel } from '../lib/log-reader'
+import { listBackups } from '../lib/backups'
+import { settle } from '../lib/settle'
+
+export const prerender = false
+
+/**
+ * The operations page — five signals that answer different questions.
+ *
+ * ── Why five panels and not one number ───────────────────────────────────────
+ *
+ * Every panel here can be healthy while the system is broken, which is why they
+ * are all shown rather than averaged into a single status light:
+ *
+ *   uptime     Is it answering? (from OUTSIDE, on a schedule)
+ *   requests   What is real traffic getting? (from INSIDE, per request)
+ *   workflows  Did background work finish, or fail, or roll back?
+ *   logs       What did the services say while it happened?
+ *   backups    If this all goes wrong, what can you get back?
+ *
+ * The classic trap is a green uptime check over a broken app: the health
+ * endpoint returns 200 while every real request 500s. Uptime and requests
+ * disagreeing is the signal, and it only exists because both are measured.
+ *
+ * ── Where each number comes from, and why that differs ───────────────────────
+ *
+ * Three of these are read by DIRECT IMPORT and two over HTTP, which looks
+ * inconsistent until you ask who owns the data:
+ *
+ *   • requests, logs, backups — owned by THIS process / this machine. The
+ *     request buffer lives in this Node process, so importing it is the only
+ *     way to read it; fetching /api/monitor would make the server call itself
+ *     for data already in memory.
+ *
+ *   • uptime, workflows — owned by MEDUSA, which has the tables. Fetched over
+ *     HTTP, because the repo's rule holds even for monitoring: Astro does not
+ *     open a connection to a database it does not own.
+ *
+ * So "Astro owns no data" is unbroken. Astro owns this *process*, and the
+ * request buffer is process state, not domain data.
+ */
+
+// ── Filters, done without JavaScript ────────────────────────────────────────
+//
+// Both filters are read from the query string and applied on the server, so
+// they work with JS disabled and every view is a shareable URL. Contrast
+// components/ReviewFilter.tsx, which is a React island precisely because it
+// filters an already-loaded list without a round trip. Same word, two
+// different problems: this one needs the server, that one must not touch it.
+const url = Astro.url
+const klass = url.searchParams.get('class') ?? ''
+const level = (url.searchParams.get('level') ?? 'warn') as LogLevel | 'all'
+const hours = Math.min(168, Math.max(1, Number(url.searchParams.get('hours') ?? 24) || 24))
+
+const repoRoot = resolve(process.cwd(), '../..')
+
+/**
+ * Everything concurrent, everything allowed to fail alone — same `settle` the
+ * dashboard uses. Medusa being down must leave the Astro-sourced panels
+ * rendering, because those are the ones that would tell you Medusa is down.
+ */
+const [uptime, workflows, logs, backups] = await Promise.all([
+  settle(() => getUptime(hours)),
+  settle(() => getWorkflows(20)),
+  settle(() => readLogs(repoRoot, { level, limit: 40 })),
+  settle(() => listBackups(repoRoot)),
+])
+
+// ── Requests: synchronous, because it is in this process ────────────────────
+const reqs = requestSummary()
+const recent = requestQuery({ klass: klass || undefined, limit: 25 })
+
+const requestRows = [
+  { label: '2xx', value: reqs.byClass['2xx'] ?? 0 },
+  { label: '3xx', value: reqs.byClass['3xx'] ?? 0 },
+  { label: '4xx', value: reqs.byClass['4xx'] ?? 0 },
+  { label: '5xx', value: reqs.byClass['5xx'] ?? 0 },
+]
+
+const errorRate = reqs.totalRequests
+  ? Math.round((((reqs.byClass['4xx'] ?? 0) + (reqs.byClass['5xx'] ?? 0)) / reqs.totalRequests) * 1000) / 10
+  : 0
+
+// ── Uptime ──────────────────────────────────────────────────────────────────
+const targets = uptime.ok ? uptime.value.targets : []
+const monitoring = uptime.ok && uptime.value.monitoring
+
+/** Worst target, because a mean uptime across three services hides the down one. */
+const worst = targets.length
+  ? targets.reduce((a, b) => (a.uptimePercent <= b.uptimePercent ? a : b))
+  : null
+
+function uptimeTone(percent: number): 'ok' | 'warn' | 'down' {
+  if (percent >= 99.9) return 'ok'
+  if (percent >= 95) return 'warn'
+  return 'down'
+}
+
+// ── Workflows ───────────────────────────────────────────────────────────────
+const wf = workflows.ok ? workflows.value : null
+
+// ── Logs ────────────────────────────────────────────────────────────────────
+const logLines = logs.ok ? logs.value.lines : []
+const logCounts = logs.ok ? logs.value.counts : { error: 0, warn: 0, info: 0, debug: 0 }
+const logMissing = logs.ok ? logs.value.missing : []
+
+// ── Backups ─────────────────────────────────────────────────────────────────
+const bk = backups.ok ? backups.value : null
+
+function bytes(n: number): string {
+  if (n > 1_048_576) return `${Math.round((n / 1_048_576) * 10) / 10} MB`
+  if (n > 1024) return `${Math.round(n / 1024)} kB`
+  return `${n} B`
+}
+
+function age(h: number): string {
+  if (!Number.isFinite(h)) return 'unknown age'
+  if (h < 1) return `${Math.round(h * 60)} min ago`
+  if (h < 48) return `${Math.round(h)} h ago`
+  return `${Math.round(h / 24)} days ago`
+}
+
+const levelTabs: (LogLevel | 'all')[] = ['error', 'warn', 'all']
+const classTabs = ['', '2xx', '4xx', '5xx', 'errors']
+---
+
+<Layout
+  title="Operations"
+  subtitle="Uptime, traffic, background work, logs and backups — five signals that fail in different ways."
+  section="monitor"
+>
+  <!-- ── 1 · Uptime ─────────────────────────────────────────────────────── -->
+  <section class="stack">
+    <div class="row between">
+      <h2>Uptime</h2>
+      <div class="row small">
+        {
+          [1, 24, 168].map((h) => (
+            <a
+              class:list={['btn', 'small', { active: hours === h }]}
+              href={`/monitor?hours=${h}&class=${klass}&level=${level}`}
+            >
+              {h === 1 ? '1 h' : h === 24 ? '24 h' : '7 d'}
+            </a>
+          ))
+        }
+      </div>
+    </div>
+
+    <p class="small muted">
+      Measured by a scheduled job inside Medusa that requests each service over HTTP every minute and
+      writes the result to its own table. Out-of-band on purpose: a service cannot credibly report
+      that it is down.
+    </p>
+
+    {
+      !uptime.ok && (
+        <div class="notice">
+          <strong>Medusa unreachable</strong> — {uptime.error}
+          <p class="small muted">
+            Uptime history lives in Medusa's database, so this panel needs Medusa up. The panels
+            below come from this Astro process and are unaffected.
+          </p>
+        </div>
+      )
+    }
+
+    {
+      uptime.ok && !monitoring && (
+        <div class="notice">
+          <strong>No checks recorded yet</strong>
+          <p class="small muted">{uptime.value.note}</p>
+        </div>
+      )
+    }
+
+    {
+      monitoring && (
+        <>
+          <div class="grid cols-3">
+            {targets.map((t) => (
+              <StatTile
+                label={t.target}
+                value={`${t.uptimePercent}%`}
+                tone={uptimeTone(t.uptimePercent)}
+                note={`${t.checks} checks · ${t.failures} failed · ${t.avgLatencyMs}ms avg`}
+              />
+            ))}
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Target</th>
+                  <th>Now</th>
+                  <th>Streak</th>
+                  <th>Latency</th>
+                  <th>Last incident</th>
+                </tr>
+              </thead>
+              <tbody>
+                {targets.map((t) => (
+                  <tr>
+                    <td>
+                      <span class="mono small">{t.target}</span>
+                      <br />
+                      <span class="small muted mono">{t.url}</span>
+                    </td>
+                    <td>
+                      <span class:list={['badge', t.currentlyUp ? 'ok' : 'down']}>
+                        {t.currentlyUp ? 'up' : 'down'}
+                      </span>
+                    </td>
+                    <td class="small">
+                      {t.streak} check{t.streak === 1 ? '' : 's'}
+                    </td>
+                    <td class="small mono">{t.avgLatencyMs}ms</td>
+                    <td class="small">
+                      {t.lastIncidentAt ? (
+                        <>
+                          {new Date(t.lastIncidentAt).toLocaleString()}
+                          <br />
+                          <span class="muted mono">{t.lastIncidentError ?? 'no detail'}</span>
+                        </>
+                      ) : (
+                        <span class="muted">none in window</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {worst && worst.uptimePercent < 100 && (
+            <p class="small muted">
+              The worst target is shown rather than an average: three services at 100%, 100% and 0%
+              average to 67%, which describes nothing that is actually happening.
+            </p>
+          )}
+        </>
+      )
+    }
+  </section>
+
+  <!-- ── 2 · Requests ───────────────────────────────────────────────────── -->
+  <section class="stack">
+    <h2>Requests</h2>
+    <p class="small muted">
+      Recorded by <span class="mono">src/middleware.ts</span>, which already sees every request for
+      rate limiting. In-memory and per-process: it resets on restart and holds the last
+      {reqs.capacity} requests. It also cannot see anything rejected <em>before</em> middleware runs —
+      Astro's origin check returns 403 upstream of this buffer.
+    </p>
+
+    <div class="grid cols-4">
+      <StatTile label="Total since start" value={reqs.totalRequests} note={`${reqs.uptimeSeconds}s uptime`} />
+      <StatTile
+        label="Error rate"
+        value={`${errorRate}%`}
+        tone={errorRate > 10 ? 'down' : errorRate > 2 ? 'warn' : 'ok'}
+        note={`${(reqs.byClass['4xx'] ?? 0) + (reqs.byClass['5xx'] ?? 0)} of ${reqs.totalRequests}`}
+      />
+      <StatTile label="p50 / p95" value={`${reqs.p50Ms} / ${reqs.p95Ms}ms`} note="median and slow tail" />
+      <StatTile
+        label="Rate limited"
+        value={reqs.rateLimited}
+        tone={reqs.rateLimited > 0 ? 'warn' : 'neutral'}
+        note="429s returned"
+      />
+    </div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <DistributionBar title="By status class" rows={requestRows} unit="requests" />
+      </div>
+
+      <div class="card stack">
+        <h3>Last minute</h3>
+        <p class="small muted">
+          Windowed, so it describes now rather than all history — a 5% error rate since start is
+          calm; 5% in the last minute while you are watching is not.
+        </p>
+        <div class="grid cols-2">
+          <StatTile label="Requests" value={reqs.lastMinute} />
+          <StatTile
+            label="Errors"
+            value={reqs.errorsLastMinute}
+            tone={reqs.errorsLastMinute > 0 ? 'warn' : 'ok'}
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="row between">
+      <h3>Recent</h3>
+      <div class="row small">
+        {
+          classTabs.map((c) => (
+            <a
+              class:list={['btn', 'small', { active: klass === c }]}
+              href={`/monitor?class=${c}&level=${level}&hours=${hours}`}
+            >
+              {c === '' ? 'all' : c}
+            </a>
+          ))
+        }
+      </div>
+    </div>
+
+    {
+      recent.length === 0 ? (
+        <p class="small muted">
+          Nothing recorded{klass ? ` for ${klass}` : ''} yet. Click around the site and reload.
+        </p>
+      ) : (
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Status</th>
+                <th>Method</th>
+                <th>Path</th>
+                <th>Took</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map((r) => (
+                <tr>
+                  <td class="small muted mono">{new Date(r.at).toLocaleTimeString()}</td>
+                  <td>
+                    <span
+                      class:list={[
+                        'badge',
+                        r.status >= 500 ? 'down' : r.status >= 400 ? 'pending' : 'ok',
+                      ]}
+                    >
+                      {r.status}
+                    </span>
+                    {r.limited && <span class="badge pending">limited</span>}
+                  </td>
+                  <td class="small mono">{r.method}</td>
+                  <td class="small mono">{r.path}</td>
+                  <td class="small mono">{r.durationMs}ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </section>
+
+  <!-- ── 3 · Workflows ──────────────────────────────────────────────────── -->
+  <section class="stack">
+    <h2>Background work</h2>
+    <p class="small muted">
+      Medusa workflow executions, read from its <span class="mono">workflow_execution</span> table.
+      This panel is empty unless two things are true: the Redis workflow engine is configured, and
+      the workflow itself opted in with <span class="mono">{'{ store: true, retentionTime }'}</span>.
+      With the default in-memory engine the table stays permanently empty — and an empty failure
+      count looks exactly like good news.
+    </p>
+
+    {
+      !workflows.ok && (
+        <div class="notice">
+          <strong>Medusa unreachable</strong> — {workflows.error}
+        </div>
+      )
+    }
+
+    {
+      wf && !wf.retaining && (
+        <div class="notice">
+          <strong>Nothing retained</strong>
+          <p class="small muted">{wf.note}</p>
+        </div>
+      )
+    }
+
+    {
+      wf && wf.retaining && (
+        <>
+          <div class="grid cols-4">
+            <StatTile label="Succeeded" value={wf.counts.successful} tone="ok" note="state: done" />
+            <StatTile
+              label="In flight"
+              value={wf.counts.pending}
+              tone={wf.counts.pending > 0 ? 'warn' : 'neutral'}
+              note="not started, invoking, compensating"
+            />
+            <StatTile
+              label="Rolled back"
+              value={wf.counts.reverted}
+              tone={wf.counts.reverted > 0 ? 'warn' : 'neutral'}
+              note="failed, but compensation ran"
+            />
+            <StatTile
+              label="Failed"
+              value={wf.counts.failed}
+              tone={wf.counts.failed > 0 ? 'down' : 'ok'}
+              note="could not roll back — needs a human"
+            />
+          </div>
+
+          <div class="notice">
+            <p class="small">
+              <strong>Rolled back is not the same as failed.</strong> A <span class="mono">reverted</span>
+              workflow failed and then undid everything it had already done, leaving no half-written
+              data — that is compensation working, and it is the case
+              <span class="mono">scripts/test-compensation.ts</span> proves. A
+              <span class="mono">failed</span> workflow could not be rolled back, so it may have left
+              orphans behind. Only the second one is worth waking someone up for.
+            </p>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Workflow</th>
+                  <th>State</th>
+                  <th>Steps</th>
+                  <th>Finished</th>
+                </tr>
+              </thead>
+              <tbody>
+                {wf.executions.map((e) => (
+                  <tr>
+                    <td>
+                      <span class="mono small">{e.workflowId}</span>
+                      <br />
+                      <span class="small muted mono">{e.transactionId}</span>
+                    </td>
+                    <td>
+                      <span
+                        class:list={[
+                          'badge',
+                          e.state === 'done' ? 'ok' : e.state === 'failed' ? 'down' : 'pending',
+                        ]}
+                      >
+                        {e.state}
+                      </span>
+                    </td>
+                    <td class="small mono steps">
+                      {e.steps.length === 0 ? (
+                        <span class="muted">no step detail</span>
+                      ) : (
+                        e.steps.map((s) => (
+                          <div style={`padding-left:${(s.depth - 1) * 10}px`}>
+                            <span
+                              class:list={[
+                                'dot',
+                                s.invoke === 'done'
+                                  ? 'ok'
+                                  : s.invoke === 'failed'
+                                    ? 'down'
+                                    : s.invoke === 'not_started'
+                                      ? 'idle'
+                                      : 'warn',
+                              ]}></span>
+                            {s.name.split('.').pop()}
+                            <span class="muted">
+                              {' '}
+                              {s.invoke}
+                              {s.invokeStatus && s.invokeStatus !== 'ok' ? `/${s.invokeStatus}` : ''}
+                              {s.compensate && s.compensate !== 'dormant'
+                                ? ` → comp ${s.compensate}`
+                                : ''}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </td>
+                    <td class="small muted mono">{new Date(e.updatedAt).toLocaleTimeString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )
+    }
+  </section>
+
+  <!-- ── 4 · Logs ───────────────────────────────────────────────────────── -->
+  <section class="stack">
+    <div class="row between">
+      <h2>Logs</h2>
+      <div class="row small">
+        {
+          levelTabs.map((l) => (
+            <a
+              class:list={['btn', 'small', { active: level === l }]}
+              href={`/monitor?level=${l}&class=${klass}&hours=${hours}`}
+            >
+              {l}
+              {l !== 'all' && ` (${logCounts[l as LogLevel]})`}
+            </a>
+          ))
+        }
+      </div>
+    </div>
+
+    <p class="small muted">
+      Read from disk: Payload and Medusa because <span class="mono">npm run dev</span> tees their
+      output to <span class="mono">logs/</span>, Astro because it writes its own JSON log to
+      <span class="mono">.astro/dev.log</span>. Astro's levels are exact; the other two are
+      <em>guessed</em> from the words in each line, so a sentence containing "error" can be
+      misfiled. That gap is the argument for structured logging, visible rather than hidden.
+    </p>
+
+    {
+      !logs.ok && (
+        <div class="notice">
+          <strong>Could not read logs</strong> — {logs.error}
+        </div>
+      )
+    }
+
+    {
+      logMissing.length > 0 && (
+        <p class="small muted">
+          No log file for <span class="mono">{logMissing.join(', ')}</span> — those services were
+          started without <span class="mono">npm run dev</span>, so nothing was captured.
+        </p>
+      )
+    }
+
+    {
+      logs.ok && logLines.length === 0 ? (
+        <p class="small muted">
+          Nothing at <span class="mono">{level}</span> level or above. That is the good outcome.
+        </p>
+      ) : (
+        <div class="logs mono">
+          {logLines.map((l) => (
+            <div class:list={['log-line', l.level]}>
+              <span class="log-service">{l.service}</span>
+              <span class:list={['log-level', l.level]}>{l.level}</span>
+              <span class="log-text">{l.text}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
+  </section>
+
+  <!-- ── 5 · Backups ────────────────────────────────────────────────────── -->
+  <section class="stack">
+    <h2>Backups</h2>
+    <p class="small muted">
+      Written by <span class="mono">npm run db:export</span>. This panel is
+      <strong>read-only by design</strong>: this app has no authentication, so a button that dumps
+      both databases would be an exfiltration route, and a restore button would be a delete button.
+      The dangerous half stays in a shell where the OS has already decided you are allowed.
+    </p>
+
+    {
+      !backups.ok && (
+        <div class="notice">
+          <strong>Could not read backups/</strong> — {backups.error}
+        </div>
+      )
+    }
+
+    {
+      bk && !bk.everBackedUp && (
+        <div class="notice">
+          <strong>No backups exist</strong>
+          <p class="small">
+            Run <span class="mono">npm run db:export</span>. Until then there is nothing to restore
+            — and <span class="mono">npm run db:reset</span> deletes the Docker volume outright.
+          </p>
+        </div>
+      )
+    }
+
+    {
+      bk && bk.everBackedUp && (
+        <>
+          <div class="grid cols-3">
+            <StatTile
+              label="Newest backup"
+              value={age(bk.newest!.ageHours)}
+              tone={bk.stale ? 'warn' : 'ok'}
+              note={bk.newest!.name}
+            />
+            <StatTile label="Rows captured" value={bk.newest!.totalRows} note={`${bytes(bk.newest!.bytes)} on disk`} />
+            <StatTile
+              label="Media files"
+              value={bk.newest!.mediaFiles}
+              tone={bk.newest!.mediaFiles === 0 ? 'warn' : 'neutral'}
+              note={bk.newest!.mediaFiles === 0 ? 'none archived' : 'tarred alongside'}
+            />
+          </div>
+
+          {bk.stale && (
+            <div class="notice">
+              <strong>The newest backup is over a day old.</strong> Row counts drift from the manifest
+              as you use the app, which is fine — but a restore returns the app to the state in that
+              dump, not to yesterday.
+            </div>
+          )}
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Backup</th>
+                  <th>Age</th>
+                  <th>Size</th>
+                  <th>Contents</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bk.backups.map((b) => (
+                  <tr>
+                    <td class="small mono">
+                      {b.name}
+                      {b.incomplete && <span class="badge down">no manifest</span>}
+                    </td>
+                    <td class="small">{age(b.ageHours)}</td>
+                    <td class="small mono">{bytes(b.bytes)}</td>
+                    <td class="small">
+                      {b.databases.length === 0 ? (
+                        <span class="muted">unreadable — db:import will refuse this</span>
+                      ) : (
+                        b.databases.map((d) => (
+                          <div class="mono">
+                            {d.name}: {d.rows} rows in {d.tables} tables
+                            <span class="muted"> · {d.migrationState}</span>
+                          </div>
+                        ))
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p class="small muted">
+            The migration state is recorded so <span class="mono">npm run db:import</span> can refuse
+            a dump taken against a different schema. Restoring old data into new code gives you
+            neither the old state nor the new one, and the errors surface far from the cause.
+          </p>
+        </>
+      )
+    }
+  </section>
+
+  <section class="stack">
+    <h2>Reading these together</h2>
+    <div class="grid cols-2">
+      <div class="card stack">
+        <h3>Uptime green, requests red</h3>
+        <p class="small muted">
+          The health endpoint answers while real requests fail. Usually a dependency the health check
+          does not touch — a health check that only proves the process is listening will always miss
+          this. Look at the 5xx paths, then the logs for that service.
+        </p>
+      </div>
+      <div class="card stack">
+        <h3>Requests fine, workflows failing</h3>
+        <p class="small muted">
+          The HTTP response was 200 because the work is asynchronous. This is the gap monitoring
+          usually has: the user was told it worked. Check whether the state is
+          <span class="mono">reverted</span> (rolled back cleanly) or
+          <span class="mono">failed</span> (may have left orphans).
+        </p>
+      </div>
+      <div class="card stack">
+        <h3>Everything green, backup a week old</h3>
+        <p class="small muted">
+          The only panel here that describes the future. The other four tell you about a system that
+          is currently working; this one tells you what you keep if it stops.
+        </p>
+      </div>
+      <div class="card stack">
+        <h3>All five quiet, users complaining</h3>
+        <p class="small muted">
+          Suspect the blind spots, and they are known ones: the request log misses anything rejected
+          before middleware, uptime samples once a minute, and this buffer is per-process. Every
+          signal here has an edge — knowing where it is, is the difference between monitoring and
+          reassurance.
+        </p>
+      </div>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  section {
+    margin-bottom: 40px;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 20px;
+  }
+
+  h3 {
+    margin: 0;
+    font-size: 15px;
+  }
+
+  .row.between {
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .btn.active {
+    background: var(--accent);
+    color: var(--surface);
+    border-color: var(--accent);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  .steps div {
+    line-height: 1.7;
+    white-space: nowrap;
+  }
+
+  /* A dot plus the state word, never colour alone — the text carries the
+     meaning and the dot only makes it scannable. */
+  .dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    margin-right: 6px;
+    background: var(--text-muted);
+  }
+
+  .dot.ok {
+    background: var(--green);
+  }
+  .dot.warn {
+    background: var(--amber);
+  }
+  .dot.down {
+    background: var(--red);
+  }
+  .dot.idle {
+    background: var(--border);
+  }
+
+  .logs {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    font-size: 12px;
+    /* Capped so a noisy session cannot make the page scroll forever. */
+    max-height: 460px;
+    overflow-y: auto;
+  }
+
+  .log-line {
+    display: grid;
+    grid-template-columns: 80px 46px 1fr;
+    gap: 8px;
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+  }
+
+  .log-line:last-child {
+    border-bottom: 0;
+  }
+
+  .log-line.error {
+    background: var(--red-soft);
+  }
+
+  .log-line.warn {
+    background: var(--amber-soft);
+  }
+
+  .log-service {
+    color: var(--text-muted);
+  }
+
+  .log-level {
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+  }
+
+  .log-level.error {
+    color: var(--red);
+  }
+  .log-level.warn {
+    color: var(--amber);
+  }
+  .log-level.info,
+  .log-level.debug {
+    color: var(--text-muted);
+  }
+
+  /* Long lines wrap rather than scroll horizontally — a stack trace you have to
+     scroll sideways to read is one you do not read. */
+  .log-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .badge + .badge {
+    margin-left: 4px;
+  }
+</style>

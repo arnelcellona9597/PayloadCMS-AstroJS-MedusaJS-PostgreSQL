@@ -1,0 +1,132 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import { getPageBySlug } from '../../lib/payload'
+import { lexicalToHtml } from '../../lib/lexical'
+
+export const prerender = false
+
+/**
+ * Renders a page assembled from BLOCKS in the Payload admin.
+ *
+ * ── Why blocks are worth the tables they cost ─────────────────────────────
+ *
+ * The editor picked the sections and their order. This file decides how each
+ * section LOOKS. Neither side can break the other:
+ *
+ *   • they cannot produce markup you did not design
+ *   • you cannot be surprised by a shape you did not handle — every block type
+ *     has known fields
+ *
+ * That contract is the difference between blocks and a free-form richText field,
+ * where an editor's pasted HTML becomes your problem.
+ *
+ * ── The switch is exhaustive on purpose ───────────────────────────────────
+ * `blockType` is a discriminated union (see PageBlock in src/lib/payload.ts), so
+ * TypeScript narrows each branch and will complain if you add a block type in
+ * Payload and forget to render it here. That compile error is the feature.
+ */
+const { slug } = Astro.params
+
+const page = await getPageBySlug(slug!)
+
+if (!page) {
+  return new Response('Page not found', { status: 404 })
+}
+
+const blocks = page.layout ?? []
+---
+
+<Layout title={page.title} section="home">
+  {
+    blocks.length === 0 ? (
+      <div class="notice info">
+        <p>
+          This page has no sections yet. Add some in the
+          <a href={`http://localhost:3000/admin/collections/pages/${page.id}`}> Payload admin</a>
+          and reload — the order you choose there is the order they appear here.
+        </p>
+      </div>
+    ) : (
+      <div class="blocks">
+        {blocks.map((block) => {
+          switch (block.blockType) {
+            case 'hero':
+              return (
+                <section class:list={['block-hero', block.align]}>
+                  <h2>{block.heading}</h2>
+                  {block.subheading && <p class="lede">{block.subheading}</p>}
+                </section>
+              )
+
+            case 'prose':
+              return (
+                /*
+                 * set:html is safe here only because lexicalToHtml escapes every
+                 * text node itself. Never pass raw CMS output to it.
+                 */
+                <section class="block-prose prose" set:html={lexicalToHtml(block.body)} />
+              )
+
+            case 'stats':
+              return (
+                <section class="block-stats">
+                  <div class="grid cols-4">
+                    {(block.items ?? []).map((item) => (
+                      <div class="card">
+                        <p class="stat-value">{item.value}</p>
+                        <p class="stat-label">{item.label}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )
+
+            default:
+              /*
+               * Unreachable while the union is exhaustive — but if someone adds a
+               * block type in Payload and deploys before updating this file, an
+               * editor should see a hint rather than a blank gap.
+               */
+              return (
+                <div class="notice info">
+                  <p>Unhandled block type — add a case for it in this file.</p>
+                </div>
+              )
+          }
+        })}
+      </div>
+    )
+  }
+
+  <div class="card" style="margin-top:40px">
+    <h3>What you are looking at</h3>
+    <p class="small muted" style="margin-bottom:0">
+      {blocks.length} section{blocks.length === 1 ? '' : 's'}, chosen and ordered in the Payload
+      admin, rendered by <code class="path">src/pages/pages/[slug].astro</code>. Each block type
+      has its own Postgres table — see <code class="path">docs/learn/10-databases.md</code> §10.2.
+    </p>
+  </div>
+</Layout>
+
+<style>
+  .blocks { display: flex; flex-direction: column; gap: 36px; }
+
+  .block-hero h2 { font-size: 28px; margin-bottom: 8px; }
+  .block-hero.center { text-align: center; }
+  .block-hero.center .lede { margin-left: auto; margin-right: auto; }
+
+  .stat-value {
+    font-size: 26px;
+    font-weight: 600;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-label {
+    margin: 4px 0 0;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+</style>

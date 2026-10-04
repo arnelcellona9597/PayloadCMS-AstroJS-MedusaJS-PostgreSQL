@@ -1,0 +1,77 @@
+---
+import { actions, isInputError } from 'astro:actions'
+
+import Layout from '../../layouts/Layout.astro'
+import PostFormFields from '../../components/PostFormFields.astro'
+import { listCategories } from '../../lib/payload'
+
+export const prerender = false
+
+/**
+ * Create a post — Pattern A, the full Action lifecycle in one page.
+ *
+ * 1. The form POSTs to `actions.post.create`.
+ * 2. Astro validates the FormData against the Action's zod schema.
+ * 3. On success the handler calls Payload and we redirect to the list.
+ * 4. On failure the page re-renders and `Astro.getActionResult` gives us the
+ *    error, with `isInputError` exposing per-field messages.
+ *
+ * None of this needs client-side JavaScript. Disable JS and it still works —
+ * that is the whole argument for Actions over a fetch-based form.
+ */
+const result = Astro.getActionResult(actions.post.create)
+
+// Redirect only on success, so a failed submission keeps the user's input on
+// screen next to the errors.
+if (result && !result.error) {
+  return Astro.redirect('/posts?created=' + result.data.id)
+}
+
+const fieldErrors = result?.error && isInputError(result.error) ? result.error.fields : {}
+
+const { docs: categories } = await listCategories()
+---
+
+<Layout title="New post" subtitle="Pattern A · Astro Action → Payload REST API" section="posts">
+  {
+    result?.error && !isInputError(result.error) && (
+      <div class="notice error">
+        <p>{result.error.message}</p>
+      </div>
+    )
+  }
+  {
+    result?.error && isInputError(result.error) && (
+      <div class="notice error">
+        <p>Some fields need attention — see below.</p>
+      </div>
+    )
+  }
+
+  <div class="grid cols-2">
+    <div class="card">
+      <form method="POST" action={actions.post.create}>
+        <PostFormFields categories={categories} errors={fieldErrors} />
+        <div class="row">
+          <button class="btn primary" type="submit">Create post</button>
+          <a class="btn" href="/posts">Cancel</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>The path this request takes</h3>
+      <ol class="small stack" style="padding-left:18px">
+        <li>Browser POSTs FormData to this same URL.</li>
+        <li><code class="path">src/actions/index.ts</code> — zod parses and coerces the form fields.</li>
+        <li><code class="path">src/lib/payload.ts</code> — adds the <code>users API-Key</code> header.</li>
+        <li>Payload: access control → <code>beforeValidate</code> (slug) → <code>beforeChange</code> → insert.</li>
+        <li><code>afterChange</code> logs in the CMS terminal. Watch it happen.</li>
+      </ol>
+      <p class="small muted" style="margin-bottom:0">
+        Compare with the review form on <a href="/reviews">/reviews</a>, which goes through a hand-written endpoint
+        instead.
+      </p>
+    </div>
+  </div>
+</Layout>

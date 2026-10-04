@@ -1,0 +1,116 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import { priceFrom, formatPrice } from '../../lib/types'
+import RatingStars from '../../components/RatingStars.astro'
+import { getProductReviews, listProducts } from '../../lib/medusa'
+
+export const prerender = false
+
+/**
+ * Product grid with aggregate ratings.
+ *
+ * Two different Medusa surfaces in one page:
+ *   • `listProducts()`      → the SDK's typed method for a BUILT-IN route
+ *   • `getProductReviews()` → `sdk.client.fetch` against a route we invented
+ *
+ * The rating for each product is fetched per product, concurrently. That is N+1
+ * requests and it is the honest cost of module isolation: reviews live in their
+ * own module, so there is no single query that returns products with their
+ * ratings attached. A real storefront would add a route that batches this —
+ * worth noticing rather than hiding.
+ */
+const products = await listProducts(24)
+
+const withRatings = await Promise.all(
+  products.map(async (product) => {
+    try {
+      const { stats } = await getProductReviews(product.id)
+      return { product, stats }
+    } catch {
+      return { product, stats: { count: 0, average: 0, distribution: {} } }
+    }
+  }),
+)
+---
+
+<Layout
+  title="Products"
+  subtitle="Medusa's built-in product module, joined to our custom Review module through a link table."
+  section="products"
+>
+  <div class="grid cols-3">
+    {
+      withRatings.map(({ product, stats }) => (
+        <a class="card" href={`/products/${product.handle}`} style="text-decoration:none;color:inherit">
+          {product.thumbnail && (
+            <img class="shot" src={product.thumbnail} alt="" width="320" height="240" loading="lazy" />
+          )}
+          <h3>{product.title}</h3>
+          {/*
+            `calculated_price` only arrives because listProducts() passes a
+            region_id — see lib/medusa.ts. No region, no price, and the label
+            below simply disappears rather than printing a misleading zero.
+          */}
+          {(() => {
+            const price = priceFrom(product)
+            return price ? (
+              <p class="price">
+                from {formatPrice(price.amount, price.currency)}
+                <span class="small muted"> / month</span>
+              </p>
+            ) : null
+          })()}
+          <p class="small muted">
+            {stats.count > 0 ? (
+              <span>
+                <RatingStars rating={stats.average} showNumber /> · {stats.count} review{stats.count === 1 ? '' : 's'}
+              </span>
+            ) : (
+              <span>No approved reviews yet</span>
+            )}
+          </p>
+          <p class="small muted mono">/{product.handle}</p>
+        </a>
+      ))
+    }
+  </div>
+
+  {
+    products.length === 0 && (
+      <div class="notice info">
+        <p>
+          No products. Run <code class="path">npm run seed</code> in <code class="path">apps/commerce</code>.
+        </p>
+      </div>
+    )
+  }
+
+  <div class="card" style="margin-top:28px">
+    <h3>The N+1 in this page</h3>
+    <p class="small muted" style="margin-bottom:0">
+      One request lists the products, then one more per product fetches its rating. Modules cannot be joined in SQL, so
+      "products with ratings" is not a single query. The fix is a purpose-built route that resolves many products'
+      reviews in one <code>query.graph</code> call — the same trade-off you accept for any service boundary.
+    </p>
+  </div>
+</Layout>
+
+<style>
+  .shot {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+
+  .price {
+    margin: 0 0 6px;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+  }
+</style>

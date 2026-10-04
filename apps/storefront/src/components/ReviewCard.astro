@@ -1,0 +1,25 @@
+---
+import RatingStars from './RatingStars.astro'
+import type { StoreReview } from '../lib/types'
+
+interface Props {
+  review: StoreReview & { status?: string }
+}
+
+const { review } = Astro.props
+const date = new Date(review.created_at).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+})
+---
+
+<article class="card">
+  <div class="row between">
+    <h3>{review.title}</h3>
+    <RatingStars rating={review.rating} />
+  </div>
+  <p class="muted small">{review.author_name} · {date}</p>
+  <p>{review.content}</p>
+  {review.status && <span class:list={['badge', review.status]}>{review.status}</span>}
+</article>

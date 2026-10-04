@@ -1,0 +1,16 @@
+---
+/**
+ * Renders zod field errors coming back from an Astro Action.
+ *
+ * `isInputError(error)` gives you `error.fields`, a record of field name →
+ * messages. That is the payoff of declaring `input:` on the Action: you get
+ * per-field errors without writing any validation plumbing in the page.
+ */
+interface Props {
+  messages?: string[]
+}
+
+const { messages } = Astro.props
+---
+
+{messages && messages.length > 0 && <span class="error-text">{messages.join(' ')}</span>}

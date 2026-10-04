@@ -1,0 +1,476 @@
+###############################################################################
+# Runnable requests for every CRUD path in the stack.
+#
+# Two ways to use this file:
+#   • VS Code / JetBrains REST Client — click "Send Request" above any block
+#   • As a reference for the equivalent curl, shown under each section
+#
+# Fill in the two @-variables first. Both are printed by the setup scripts:
+#   npm run seed       in apps/cms        → PAYLOAD_API_KEY
+#   npm run bootstrap  in apps/commerce   → MEDUSA_PUBLISHABLE_KEY
+#
+# ── Two things that will trip you up from curl ─────────────────────────────
+#
+# 1. Quote the URL and pass -g whenever it contains square brackets. curl treats
+#    [ ] as a glob range and refuses the request otherwise:
+#      "bad range in URL position ..."
+#    Affects every Payload `where[...]` and `select[...]` query below.
+#
+# 2. Astro's CSRF protection rejects DELETE to /api/** without a matching Origin
+#    header, with 403 "Cross-site DELETE form submissions are forbidden".
+#    Browsers send Origin automatically, so the UI is unaffected; curl does not.
+#      curl -X DELETE http://localhost:4321/api/reviews/<id> \
+#        -H 'Origin: http://localhost:4321'
+#    Astro Action form POSTs need it too. POST and PATCH with
+#    `Content-Type: application/json` are exempt, because that content type
+#    cannot be produced by a cross-site HTML form in the first place.
+###############################################################################
+
+@payload   = http://localhost:3000
+@medusa    = http://localhost:9000
+@astro     = http://localhost:4321
+
+@payloadKey = REPLACE_WITH_PAYLOAD_API_KEY
+@pk         = REPLACE_WITH_MEDUSA_PUBLISHABLE_KEY
+
+
+###############################################################################
+# PAYLOAD — auto-generated CRUD
+#
+# Every request below is generated from apps/cms/src/collections/Posts.ts.
+# No controller, route file or handler was written for any of it.
+###############################################################################
+
+### List published posts (anonymous — drafts are filtered out by access control)
+GET {{payload}}/api/posts?limit=10&depth=1
+Accept: application/json
+
+### List ALL posts including drafts (the API key changes what access control returns)
+GET {{payload}}/api/posts?limit=10&depth=1
+Authorization: users API-Key {{payloadKey}}
+
+# curl -s 'http://localhost:3000/api/posts?limit=10&depth=1' \
+#   -H 'Authorization: users API-Key <key>'
+
+### Filter — Payload's `where` uses bracketed query params
+GET {{payload}}/api/posts?where[title][contains]=CRUD&depth=0
+Authorization: users API-Key {{payloadKey}}
+
+### Filter by exact slug (there is no /posts/slug/:slug route — you query for it)
+GET {{payload}}/api/posts?where[slug][equals]=what-are-payload-cms-collections&depth=2
+
+### Sort and paginate
+GET {{payload}}/api/posts?sort=-updatedAt&limit=2&page=1&depth=0
+
+### Select only certain fields
+GET {{payload}}/api/posts?select[title]=true&select[_status]=true&depth=0
+Authorization: users API-Key {{payloadKey}}
+
+### Count
+GET {{payload}}/api/posts/count
+Authorization: users API-Key {{payloadKey}}
+
+### CREATE — should FAIL with 403 (no API key, and `create` requires a user)
+POST {{payload}}/api/posts
+Content-Type: application/json
+
+{
+  "title": "This will be rejected"
+}
+
+### CREATE — succeeds with the API key
+# @name createPost
+POST {{payload}}/api/posts
+Content-Type: application/json
+Authorization: users API-Key {{payloadKey}}
+
+{
+  "title": "Written from the REST client",
+  "excerpt": "The slug is derived by a beforeValidate field hook.",
+  "_status": "published"
+}
+
+### READ one
+GET {{payload}}/api/posts/{{createPost.response.body.doc.id}}?depth=1
+Authorization: users API-Key {{payloadKey}}
+
+### UPDATE — Payload uses PATCH (Medusa uses POST; compare below)
+PATCH {{payload}}/api/posts/{{createPost.response.body.doc.id}}
+Content-Type: application/json
+Authorization: users API-Key {{payloadKey}}
+
+{
+  "title": "Renamed — note the slug does not change"
+}
+
+### DELETE — requires role=admin, not merely a logged-in user
+DELETE {{payload}}/api/posts/{{createPost.response.body.doc.id}}
+Authorization: users API-Key {{payloadKey}}
+
+### Custom endpoint — apps/cms/src/endpoints/postStats.ts, via the Local API
+GET {{payload}}/api/posts/stats
+
+### Same endpoint, authenticated — draft counts appear
+GET {{payload}}/api/posts/stats
+Authorization: users API-Key {{payloadKey}}
+
+### Categories
+GET {{payload}}/api/categories?limit=100&sort=name
+
+### Log in as a human (returns a JWT + sets a cookie)
+POST {{payload}}/api/users/login
+Content-Type: application/json
+
+{
+  "email": "admin@local.test",
+  "password": "supersecret"
+}
+
+
+###############################################################################
+# MEDUSA — STORE surface
+#
+# Every /store/* route needs x-publishable-api-key, custom routes included.
+# Routes live in apps/commerce/src/api/store/.
+###############################################################################
+
+### Missing key — 400, "Publishable API key required in the request header"
+GET {{medusa}}/store/reviews
+
+### List approved reviews (pending and rejected are never returned here)
+GET {{medusa}}/store/reviews?limit=50&order=-created_at
+x-publishable-api-key: {{pk}}
+
+# curl -s 'http://localhost:9000/store/reviews?limit=50' \
+#   -H 'x-publishable-api-key: pk_...'
+
+### Products (built-in route)
+# @name products
+GET {{medusa}}/store/products?limit=5&fields=id,title,handle
+x-publishable-api-key: {{pk}}
+
+### Reviews for one product — resolved THROUGH THE LINK TABLE via query.graph
+GET {{medusa}}/store/products/{{products.response.body.products.0.id}}/reviews
+x-publishable-api-key: {{pk}}
+
+### CREATE — validation failure (title too short, rating out of range)
+POST {{medusa}}/store/reviews
+Content-Type: application/json
+x-publishable-api-key: {{pk}}
+
+{
+  "product_id": "{{products.response.body.products.0.id}}",
+  "title": "no",
+  "content": "too short",
+  "rating": 9,
+  "author_name": "Tester"
+}
+
+### CREATE — rejected for sending a field the schema does not allow
+# The store validator is .strict() and has no `status` field, so a public caller
+# cannot self-publish. Returns: "Unrecognized fields: 'status'"
+POST {{medusa}}/store/reviews
+Content-Type: application/json
+x-publishable-api-key: {{pk}}
+
+{
+  "product_id": "{{products.response.body.products.0.id}}",
+  "title": "Trying to self-approve",
+  "content": "This should be rejected by .strict() before any handler runs.",
+  "rating": 5,
+  "author_name": "Sneaky",
+  "status": "approved"
+}
+
+### CREATE — nonexistent product, rejected by validateProductStep (step 1)
+POST {{medusa}}/store/reviews
+Content-Type: application/json
+x-publishable-api-key: {{pk}}
+
+{
+  "product_id": "prod_does_not_exist",
+  "title": "Ghost product",
+  "content": "Fails in the workflow's first step, before anything is written.",
+  "rating": 4,
+  "author_name": "Tester"
+}
+
+### CREATE — valid. Runs createReviewWorkflow; lands as `pending`.
+# @name createReview
+POST {{medusa}}/store/reviews
+Content-Type: application/json
+x-publishable-api-key: {{pk}}
+
+{
+  "product_id": "{{products.response.body.products.0.id}}",
+  "title": "Posted from the REST client",
+  "content": "Created through the workflow, linked to the product, awaiting moderation.",
+  "rating": 5,
+  "author_name": "REST Client",
+  "author_email": "rest@example.com"
+}
+
+### READ it on the store surface — 404, because it is still pending
+GET {{medusa}}/store/reviews/{{createReview.response.body.review.id}}
+x-publishable-api-key: {{pk}}
+
+
+###############################################################################
+# MEDUSA — ADMIN surface
+#
+# /admin/* requires an authenticated admin. The publishable key is not enough.
+# Routes live in apps/commerce/src/api/admin/.
+###############################################################################
+
+### No auth — 401
+GET {{medusa}}/admin/reviews
+
+### Log in for a JWT
+# @name adminAuth
+POST {{medusa}}/auth/user/emailpass
+Content-Type: application/json
+
+{
+  "email": "admin@local.test",
+  "password": "supersecret"
+}
+
+# curl -s -X POST http://localhost:9000/auth/user/emailpass \
+#   -H 'Content-Type: application/json' \
+#   -d '{"email":"admin@local.test","password":"supersecret"}'
+
+### List every review, any status
+GET {{medusa}}/admin/reviews?limit=50&order=-created_at
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### Filter by status
+GET {{medusa}}/admin/reviews?status=pending&limit=50
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### Search title/content/author (ILIKE)
+GET {{medusa}}/admin/reviews?q=workflow&limit=20
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### Filter by product (resolved through the link table)
+GET {{medusa}}/admin/reviews?product_id={{products.response.body.products.0.id}}
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### READ one — every column, including author_email
+GET {{medusa}}/admin/reviews/{{createReview.response.body.review.id}}
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### UPDATE — note POST, not PATCH. Medusa's admin convention.
+# Approving is all it takes for the review to appear on the store surface.
+POST {{medusa}}/admin/reviews/{{createReview.response.body.review.id}}
+Content-Type: application/json
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+{
+  "status": "approved"
+}
+
+### Now visible publicly
+GET {{medusa}}/store/reviews/{{createReview.response.body.review.id}}
+x-publishable-api-key: {{pk}}
+
+### UPDATE with an empty body — rejected by .refine()
+POST {{medusa}}/admin/reviews/{{createReview.response.body.review.id}}
+Content-Type: application/json
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+{}
+
+### DELETE — SOFT delete. The row stays in Postgres with deleted_at set.
+DELETE {{medusa}}/admin/reviews/{{createReview.response.body.review.id}}
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+# Prove it is still there:
+#   docker exec apm-postgres psql -U postgres -d medusa_crud \
+#     -c 'select id, status, deleted_at from review where deleted_at is not null;'
+
+
+###############################################################################
+# ASTRO — this app's own REST endpoints (the BFF)
+#
+# No credentials on any of these. The publishable key and admin JWT stay on the
+# server. Routes live in apps/storefront/src/pages/api/.
+###############################################################################
+
+### Health of both backends (503 if either is down — usable as a readiness probe)
+GET {{astro}}/api/health
+
+### Reviews via the store surface (approved only, no author_email)
+GET {{astro}}/api/reviews?limit=10
+
+### Same endpoint, admin surface — composition no single Medusa route offers
+GET {{astro}}/api/reviews?include_pending=true&limit=10
+
+### CREATE — JSON
+# @name bffReview
+POST {{astro}}/api/reviews
+Content-Type: application/json
+
+{
+  "product_id": "{{products.response.body.products.0.id}}",
+  "title": "Created through the BFF",
+  "content": "The browser sent no API key. The endpoint added it server-side.",
+  "rating": 4,
+  "author_name": "BFF Caller"
+}
+
+### CREATE — the same endpoint also accepts form encoding
+POST {{astro}}/api/reviews
+Content-Type: application/x-www-form-urlencoded
+
+product_id={{products.response.body.products.0.id}}&title=Form encoded&content=Accepted because the endpoint parses both encodings.&rating=3&author_name=Form User
+
+### CREATE — validation failure, 422 with field-level detail
+POST {{astro}}/api/reviews
+Content-Type: application/json
+
+{
+  "product_id": "x",
+  "title": "no",
+  "content": "short",
+  "rating": 11,
+  "author_name": ""
+}
+
+### READ one (store surface)
+GET {{astro}}/api/reviews/{{bffReview.response.body.review.id}}
+
+### READ one (admin surface — works even while pending)
+GET {{astro}}/api/reviews/{{bffReview.response.body.review.id}}?admin=true
+
+### UPDATE — PATCH here, translated to POST for Medusa
+PATCH {{astro}}/api/reviews/{{bffReview.response.body.review.id}}
+Content-Type: application/json
+
+{
+  "title": "Renamed through the BFF",
+  "status": "approved"
+}
+
+### Moderate — the same effect as above, named as an intent
+POST {{astro}}/api/reviews/{{bffReview.response.body.review.id}}/moderate
+Content-Type: application/json
+
+{
+  "status": "rejected"
+}
+
+### DELETE — a real HTTP DELETE, which an HTML form could never issue
+# The Origin header is REQUIRED here. See note 2 at the top of this file.
+DELETE {{astro}}/api/reviews/{{bffReview.response.body.review.id}}
+Origin: {{astro}}
+
+
+###############################################################################
+# ASTRO ACTIONS — the other frontend pattern
+#
+# Actions are reached at ?_action=<name> on the page that renders the form. This
+# is what a browser submits when JavaScript is disabled; you can drive it with
+# curl to prove the no-JS path really works.
+###############################################################################
+
+### CREATE a post with no JavaScript at all → 302 to /posts?created=<id>
+POST {{astro}}/posts/new?_action=post.create
+Origin: {{astro}}
+Content-Type: application/x-www-form-urlencoded
+
+title=Created by a JS-less form POST&body=First paragraph.&status=published
+
+### Validation failure → 200, page re-renders with per-field errors inline
+# `isInputError(error)` in the page turns the zod failure into error.fields.
+POST {{astro}}/posts/new?_action=post.create
+Origin: {{astro}}
+Content-Type: application/x-www-form-urlencoded
+
+title=no&status=draft
+
+### UPDATE (id must be in the body — the Action's schema requires it)
+POST {{astro}}/posts/1/edit?_action=post.update
+Origin: {{astro}}
+Content-Type: application/x-www-form-urlencoded
+
+id=1&title=Renamed through an Action&status=published
+
+### DELETE — a form POST, because HTML forms cannot issue DELETE.
+# Compare with the review DELETE above, which is a real HTTP DELETE. Same
+# operation, different mechanism, dictated by which pattern you chose.
+POST {{astro}}/posts?_action=post.delete
+Origin: {{astro}}
+Content-Type: application/x-www-form-urlencoded
+
+id=999
+
+
+###############################################################################
+# Pages (all server-rendered — curl them and you get real data in the HTML)
+###############################################################################
+
+### Overview with live health of both backends
+GET {{astro}}/
+
+### Posts — CRUD via Astro Actions
+GET {{astro}}/posts
+
+### Reviews — CRUD via the endpoints above
+GET {{astro}}/reviews
+
+### Products, with ratings resolved across the module link
+GET {{astro}}/products
+
+### Live schema of both databases
+GET {{astro}}/schema
+
+### Operations — uptime, requests, workflows, logs, backups
+GET {{astro}}/monitor
+
+
+###############################################################################
+# Operations
+#
+# Four signals in four places, on purpose. Which one you reach for depends on
+# whether your question is about the past (uptime, workflows -> durable tables)
+# or about right now (requests -> in-process buffer).
+#
+# See docs/learn/12-operating-it.md
+###############################################################################
+
+### Request log — summary plus the last N requests
+# Exempt from BOTH the request log and the rate limiter: a tool that measures
+# the system must not become part of what it measures, and must not go dark
+# under the flood you opened it to investigate.
+GET {{astro}}/api/monitor?limit=20
+
+### Request log — errors only
+GET {{astro}}/api/monitor?klass=errors
+
+### Logs — warnings and errors across all three services
+# Astro's lines carry a real level; Payload's and Medusa's are GUESSED from the
+# text. Compare the two and the case for structured logging makes itself.
+GET {{astro}}/api/logs?level=warn&limit=30
+
+### Logs — one service, searched
+GET {{astro}}/api/logs?service=commerce&search=redis
+
+### Uptime history (admin JWT)
+# Measured from OUTSIDE each service every minute, because a service cannot
+# credibly report that it is down. `monitoring:false` means never measured —
+# which is NOT the same as 100%.
+GET {{medusa}}/admin/uptime?hours=24
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### Workflow executions by state (admin JWT)
+# Empty on a default install: the in-memory engine never writes to
+# workflow_execution, so "0 failed" means nothing. Needs the Redis engine AND
+# `{ store: true, retentionTime }` on the workflow.
+GET {{medusa}}/admin/workflows?limit=20
+Authorization: Bearer {{adminAuth.response.body.token}}
+
+### Only the rollbacks
+# `reverted` = failed and rolled back cleanly. `failed` = could not roll back.
+# Run `npm run test:compensation` first to produce one.
+GET {{medusa}}/admin/workflows?state=reverted
+Authorization: Bearer {{adminAuth.response.body.token}}

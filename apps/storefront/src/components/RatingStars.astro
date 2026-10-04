@@ -1,0 +1,15 @@
+---
+interface Props {
+  rating: number
+  showNumber?: boolean
+}
+
+const { rating, showNumber = false } = Astro.props
+const filled = Math.round(rating)
+---
+
+<span class="stars" title={`${rating} out of 5`}>
+  {'★'.repeat(Math.max(0, Math.min(5, filled)))}<span class="muted"
+    >{'★'.repeat(Math.max(0, 5 - filled))}</span
+  >
+</span>{showNumber && <span class="small muted"> {rating}</span>}

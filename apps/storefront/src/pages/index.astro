@@ -1,0 +1,458 @@
+---
+import Layout from '../layouts/Layout.astro'
+import StatTile from '../components/StatTile.astro'
+import DistributionBar from '../components/DistributionBar.astro'
+import RatingStars from '../components/RatingStars.astro'
+
+import { getPostStats, listCategories, listPosts } from '../lib/payload'
+import { listProducts } from '../lib/medusa'
+import { listAdminReviews } from '../lib/medusa-admin'
+import { snapshot as rateLimitSnapshot } from '../lib/rate-limit'
+import { settle } from '../lib/settle'
+import type { AdminReview, Post } from '../lib/types'
+
+export const prerender = false
+
+/**
+ * The dashboard.
+ *
+ * Everything below runs ON THE SERVER, once per request. Two things about how
+ * it is written matter more than what it displays:
+ *
+ * 1. **Every backend call is concurrent.** One `Promise.all`, so the page costs
+ *    roughly the slowest single call rather than the sum of all of them. Six
+ *    sequential awaits here would be six round trips deep.
+ *
+ * 2. **Each panel fails independently.** `settle` turns a rejection into a
+ *    value, so Medusa being down leaves the Payload panels rendering normally
+ *    and shows a reason where the commerce numbers would be. A dashboard that
+ *    goes blank because one dependency is down is worse than no dashboard —
+ *    it hides which half is broken, which is the one thing you needed it for.
+ */
+
+const [stats, categories, recentPosts, products, reviews] = await Promise.all([
+  settle(() => getPostStats({ authenticated: true })),
+  settle(() => listCategories()),
+  settle(() => listPosts({ limit: 5, sort: '-updatedAt', depth: 0, includeDrafts: true })),
+  settle(() => listProducts(50)),
+  settle(() => listAdminReviews({ limit: 100, order: '-created_at' })),
+])
+
+// ── Derive ──────────────────────────────────────────────────────────────────
+const payloadOk = stats.ok
+const medusaOk = products.ok && reviews.ok
+
+const payloadMs = Math.max(stats.ms, categories.ms, recentPosts.ms)
+const medusaMs = Math.max(products.ms, reviews.ms)
+
+const allReviews: AdminReview[] = reviews.ok ? reviews.value.reviews : []
+const byStatus = {
+  approved: allReviews.filter((r) => r.status === 'approved').length,
+  pending: allReviews.filter((r) => r.status === 'pending').length,
+  rejected: allReviews.filter((r) => r.status === 'rejected').length,
+}
+
+const approved = allReviews.filter((r) => r.status === 'approved')
+const averageRating = approved.length
+  ? Math.round((approved.reduce((sum, r) => sum + r.rating, 0) / approved.length) * 10) / 10
+  : 0
+
+/**
+ * Rating spread across approved reviews only — the ones a shopper would
+ * actually see. Including pending or rejected would describe the moderation
+ * queue, not the product.
+ */
+const ratingRows = [5, 4, 3, 2, 1].map((star) => ({
+  label: `${star} ★`,
+  value: approved.filter((r) => r.rating === star).length,
+}))
+
+const queue = allReviews.filter((r) => r.status === 'pending').slice(0, 5)
+const posts: Post[] = recentPosts.ok ? recentPosts.value.docs : []
+
+const limiter = rateLimitSnapshot()
+const limitMax = Number(import.meta.env.RATE_LIMIT_MAX ?? 120)
+const limitWindowS = Number(import.meta.env.RATE_LIMIT_WINDOW_MS ?? 60_000) / 1000
+
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+---
+
+<Layout
+  title="Stack dashboard"
+  subtitle="Live state of all three services, read on the server at request time."
+  section="home"
+>
+  <!-- ── Service health ─────────────────────────────────────────────────── -->
+  <section>
+    <div class="grid cols-3">
+      <StatTile
+        label="Payload · CMS"
+        value={payloadOk ? 'Reachable' : 'Down'}
+        note={payloadOk ? `${payloadMs}ms · :3000` : (stats.ok ? '' : stats.error)}
+        tone={payloadOk ? 'ok' : 'down'}
+        href="http://localhost:3000/admin"
+      />
+      <StatTile
+        label="Medusa · commerce"
+        value={medusaOk ? 'Reachable' : 'Down'}
+        note={medusaOk ? `${medusaMs}ms · :9000` : (products.ok ? (reviews.ok ? '' : reviews.error) : products.error)}
+        tone={medusaOk ? 'ok' : 'down'}
+        href="http://localhost:9000/app"
+      />
+      <StatTile
+        label="Astro · this app"
+        value="Serving"
+        note={`SSR · :4321 · up ${Math.floor(limiter.uptimeSeconds / 60)}m`}
+        tone="ok"
+      />
+    </div>
+
+    {
+      (!payloadOk || !medusaOk) && (
+        <div class="notice error" style="margin-top:16px">
+          <p>
+            One backend is not answering, so its panels below are blank. Start everything with
+            <code class="path">npm run dev</code>. If both are down and the panels mention missing
+            tables, the database was reset without reseeding — run
+            <code class="path">npm run setup</code>.
+          </p>
+        </div>
+      )
+    }
+  </section>
+
+  <!-- ── Counts ─────────────────────────────────────────────────────────── -->
+  <section style="margin-top:32px">
+    <h2>Content and commerce</h2>
+    <div class="grid cols-4">
+      <StatTile
+        label="Posts"
+        value={stats.ok ? stats.value.counts.posts : '—'}
+        note={stats.ok ? `${stats.value.counts.published} published · ${stats.value.counts.drafts} draft` : 'Payload unreachable'}
+        href="/posts"
+      />
+      <StatTile
+        label="Categories"
+        value={categories.ok ? categories.value.totalDocs : '—'}
+        note={categories.ok ? 'Payload collection' : 'Payload unreachable'}
+      />
+      <StatTile
+        label="Products"
+        value={products.ok ? products.value.length : '—'}
+        note={products.ok ? 'Medusa built-in module' : 'Medusa unreachable'}
+        href="/products"
+      />
+      <StatTile
+        label="Reviews"
+        value={reviews.ok ? reviews.value.count : '—'}
+        note={reviews.ok ? 'custom Medusa module' : 'Medusa unreachable'}
+        href="/reviews"
+      />
+    </div>
+  </section>
+
+  <!-- ── Moderation + ratings ───────────────────────────────────────────── -->
+  <section style="margin-top:32px">
+    <h2>Reviews</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>Moderation</h3>
+        {
+          reviews.ok ? (
+            <>
+              {/*
+                Status as labelled rows rather than a stacked colour bar, on
+                purpose. The repo's green/amber/red fail a colour-blindness
+                check against each other (red↔amber is ΔE 4.5 under
+                deuteranopia), so colour alone must never carry the meaning.
+                Here the word is the label and the colour merely agrees with it.
+              */}
+              <div class="status-rows">
+                <div class="status-row">
+                  <span class="badge approved">approved</span>
+                  <span class="status-count">{byStatus.approved}</span>
+                  <span class="muted small">visible in the store</span>
+                </div>
+                <div class="status-row">
+                  <span class="badge pending">pending</span>
+                  <span class="status-count">{byStatus.pending}</span>
+                  <span class="muted small">awaiting a decision</span>
+                </div>
+                <div class="status-row">
+                  <span class="badge rejected">rejected</span>
+                  <span class="status-count">{byStatus.rejected}</span>
+                  <span class="muted small">hidden from the store</span>
+                </div>
+              </div>
+
+              {queue.length > 0 && (
+                <div style="margin-top:18px">
+                  <p class="eyebrow-inline">Oldest waiting</p>
+                  <ul class="queue">
+                    {queue.map((r) => (
+                      <li>
+                        <a href={`/reviews/${r.id}/edit`}>{r.title}</a>
+                        <span class="muted small"> · {r.author_name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <p class="small muted">Medusa unreachable — {reviews.error}</p>
+          )
+        }
+      </div>
+
+      <div class="card">
+        <div class="row between" style="margin-bottom:14px">
+          <h3 style="margin:0">Rating spread</h3>
+          {approved.length > 0 && (
+            <span class="row" style="gap:8px">
+              <RatingStars rating={averageRating} />
+              <span class="small muted">{averageRating} avg</span>
+            </span>
+          )}
+        </div>
+        {
+          reviews.ok ? (
+            <DistributionBar
+              rows={ratingRows}
+              emptyMessage="No approved reviews yet — approve one from /reviews."
+            />
+          ) : (
+            <p class="small muted">Medusa unreachable.</p>
+          )
+        }
+        <p class="small muted" style="margin-top:12px;margin-bottom:0">
+          Approved reviews only — the ones a shopper sees. Pending and rejected describe the
+          queue, not the product.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Recent activity ────────────────────────────────────────────────── -->
+  <section style="margin-top:32px">
+    <h2>Recent activity</h2>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>Posts <span class="chip-src payload">Payload</span></h3>
+        {
+          recentPosts.ok && posts.length > 0 ? (
+            <ul class="activity">
+              {posts.map((post) => (
+                <li>
+                  <span class:list={['badge', post._status ?? 'draft']}>{post._status}</span>
+                  <a href={`/posts/${post.id}/edit`}>{post.title}</a>
+                  <span class="muted small">{fmtTime(post.updatedAt)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="small muted">
+              {recentPosts.ok ? 'No posts yet.' : `Payload unreachable — ${recentPosts.error}`}
+            </p>
+          )
+        }
+      </div>
+
+      <div class="card">
+        <h3>Reviews <span class="chip-src medusa">Medusa</span></h3>
+        {
+          reviews.ok && allReviews.length > 0 ? (
+            <ul class="activity">
+              {allReviews.slice(0, 5).map((r) => (
+                <li>
+                  <span class:list={['badge', r.status]}>{r.status}</span>
+                  <a href={`/reviews/${r.id}/edit`}>{r.title}</a>
+                  <span class="muted small">{fmtTime(r.created_at)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="small muted">
+              {reviews.ok ? 'No reviews yet.' : `Medusa unreachable — ${reviews.error}`}
+            </p>
+          )
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Rate limiting ──────────────────────────────────────────────────── -->
+  <section style="margin-top:32px">
+    <h2>Rate limiting</h2>
+    <div class="grid cols-3">
+      <StatTile
+        label="Requests checked"
+        value={limiter.checked}
+        note={`since this process started`}
+      />
+      <StatTile
+        label="Blocked (429)"
+        value={limiter.blocked}
+        note={limiter.blocked > 0 ? 'someone hit the limit' : 'nothing throttled yet'}
+        tone={limiter.blocked > 0 ? 'warn' : 'neutral'}
+      />
+      <StatTile
+        label="Tracked clients"
+        value={limiter.trackedKeys}
+        note={`${limitMax} req / ${limitWindowS}s each`}
+      />
+    </div>
+    <div class="card" style="margin-top:16px">
+      <p class="small" style="margin-top:0">
+        <code>/api/*</code> and Astro Action submissions are limited by
+        <code class="path">src/middleware.ts</code>. Plain page views are not — reading the site
+        should never 429. Medusa limits <code>/store/*</code> separately in
+        <code class="path">apps/commerce/src/api/middlewares.ts</code>.
+      </p>
+      <p class="small muted" style="margin-bottom:0">
+        <strong>These counters are in-memory.</strong> They reset on restart and are per-process,
+        so a second instance would keep its own — exactly the limitation Medusa's in-memory event
+        bus has. Production wants Redis or an edge limiter. See
+        <code class="path">docs/learn/09-to-production.md</code>.
+      </p>
+    </div>
+  </section>
+
+  <!-- ── Architecture (kept below the live data) ────────────────────────── -->
+  <section style="margin-top:40px">
+    <h2>How the pieces fit</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Port</th>
+            <th>Database</th>
+            <th>How you get CRUD</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Payload 3</strong></td>
+            <td class="mono">3000</td>
+            <td class="mono">payload_crud</td>
+            <td>Declare a collection. REST, admin UI, SQL schema and TS types are generated.</td>
+          </tr>
+          <tr>
+            <td><strong>Medusa 2</strong></td>
+            <td class="mono">9000</td>
+            <td class="mono">medusa_crud</td>
+            <td>Data model, service, workflow, validator, route file. Five layers, on purpose.</td>
+          </tr>
+          <tr>
+            <td><strong>Astro 7</strong></td>
+            <td class="mono">4321</td>
+            <td class="muted">none</td>
+            <td>Actions for posts, its own REST endpoints for reviews.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="small muted" style="margin-top:12px">
+      The two databases are separate on purpose — neither backend can read the other's tables.
+      All integration happens over HTTP, in this app. New to the stack? Start with
+      <code class="path">docs/learn/</code>.
+    </p>
+  </section>
+
+  <section style="margin-top:32px">
+    <h2>Poke at it directly</h2>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>This app's API</h3>
+        <ul class="small stack" style="padding-left:18px;margin:0">
+          <li><a href="/api/health">/api/health</a></li>
+          <li><a href="/api/reviews">/api/reviews</a></li>
+          <li><a href="/api/reviews?include_pending=true">?include_pending=true</a></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Payload, direct</h3>
+        <ul class="small stack" style="padding-left:18px;margin:0">
+          <li><a href="http://localhost:3000/api/posts" target="_blank" rel="noopener">/api/posts</a></li>
+          <li><a href="http://localhost:3000/api/posts/stats" target="_blank" rel="noopener">/api/posts/stats</a></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Medusa, direct</h3>
+        <ul class="small stack" style="padding-left:18px;margin:0">
+          <li><a href="http://localhost:9000/store/reviews" target="_blank" rel="noopener">/store/reviews</a></li>
+          <li><a href="http://localhost:9000/health" target="_blank" rel="noopener">/health</a></li>
+        </ul>
+        <p class="small muted" style="margin-bottom:0">
+          <code>/store/*</code> returns 400 without <code>x-publishable-api-key</code>.
+        </p>
+      </div>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .status-rows { display: flex; flex-direction: column; gap: 10px; }
+
+  .status-row {
+    display: grid;
+    grid-template-columns: 5.5rem 2.5rem 1fr;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .status-count {
+    font-size: 18px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+
+  .eyebrow-inline {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 8px;
+  }
+
+  .queue, .activity { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+  .queue li { font-size: 14px; }
+
+  /* Grid, not flex-wrap: the badge, the title and the timestamp must stay on
+     one line each. With wrapping, a long title pushed its timestamp onto a
+     second row and the whole list read as ragged. The title truncates instead. */
+  .activity li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .activity li a {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .activity li .small { white-space: nowrap; }
+
+  .chip-src {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-weight: 600;
+  }
+  .chip-src.payload { background: var(--surface-2); color: var(--text-muted); }
+  .chip-src.medusa  { background: var(--accent-soft); color: var(--accent); }
+</style>

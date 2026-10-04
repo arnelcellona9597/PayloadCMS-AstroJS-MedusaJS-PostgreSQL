@@ -1,0 +1,213 @@
+---
+import Layout from '../../layouts/Layout.astro'
+import { priceFrom, formatPrice } from '../../lib/types'
+import RatingStars from '../../components/RatingStars.astro'
+import ReviewCard from '../../components/ReviewCard.astro'
+import { getProductByHandle, getProductReviews } from '../../lib/medusa'
+
+export const prerender = false
+
+/**
+ * Product detail with its reviews.
+ *
+ * The reviews come from GET /store/products/:id/reviews, which resolves them
+ * THROUGH THE LINK TABLE using `query.graph` — see
+ * apps/commerce/src/api/store/products/[id]/reviews/route.ts.
+ *
+ * Products are looked up by `handle` (the URL-friendly identifier), but the
+ * reviews route takes an `id`, so this page does handle → id first. Medusa's
+ * store product route accepts a handle filter; the custom route does not, because
+ * it was written to take whatever the link table keys on.
+ */
+const { handle } = Astro.params
+
+const product = await getProductByHandle(handle!)
+
+if (!product) {
+  return new Response('Product not found', { status: 404 })
+}
+
+const { reviews, stats } = await getProductReviews(product.id)
+
+const total = Object.values(stats.distribution).reduce((sum, n) => sum + n, 0)
+---
+
+<Layout title={product.title} subtitle={product.description ?? undefined} section="products">
+  {/*
+    Plans and pricing. Both only exist here because getProductByHandle() asks
+    for `*variants.calculated_price` with a region_id — without the region,
+    Medusa returns the variants with no price attached at all.
+  */}
+  <div class="grid cols-2">
+    <div>
+      {product.thumbnail && (
+        <img class="shot" src={product.thumbnail} alt="" width="640" height="480" loading="eager" />
+      )}
+    </div>
+
+    <div>
+      <h2>Plans</h2>
+      {product.variants && product.variants.length > 0 ? (
+        <div class="card">
+          <table class="plans">
+            <tbody>
+              {[...product.variants]
+                /* Cheapest first. Without variant_rank in the field list the
+                   API order is not meaningful, so impose one. */
+                .sort(
+                  (a, b) =>
+                    (a.calculated_price?.calculated_amount ?? Infinity) -
+                    (b.calculated_price?.calculated_amount ?? Infinity),
+                )
+                .map((variant) => (
+                <tr>
+                  <td>{variant.title ?? variant.sku ?? variant.id}</td>
+                  <td class="plan-price">
+                    {variant.calculated_price
+                      ? formatPrice(
+                          variant.calculated_price.calculated_amount,
+                          variant.calculated_price.currency_code,
+                        )
+                      : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {(() => {
+            const price = priceFrom(product)
+            return price ? (
+              <p class="small muted" style="margin-bottom:0">
+                From {formatPrice(price.amount, price.currency)} per month, billed in{' '}
+                {price.currency.toUpperCase()}.
+              </p>
+            ) : null
+          })()}
+        </div>
+      ) : (
+        <div class="notice info">
+          <p>No variants returned. Check that the request passed a region_id.</p>
+        </div>
+      )}
+
+      <p class="small muted">
+        🚫 There is no cart or checkout in this repo — these plans are a catalogue
+        only. See <code class="path">docs/how-to/06-commerce.md</code>.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid cols-2">
+    <div>
+      <h2>Rating</h2>
+      {
+        stats.count === 0 ? (
+          <div class="notice info">
+            <p>No approved reviews yet. Pending ones are hidden from this surface.</p>
+          </div>
+        ) : (
+          <div class="card">
+            <p class="row" style="gap:10px;margin-top:0">
+              <span style="font-size:32px;font-weight:600">{stats.average}</span>
+              <RatingStars rating={stats.average} />
+              <span class="muted small">{stats.count} approved</span>
+            </p>
+            <table>
+              <tbody>
+                {[5, 4, 3, 2, 1].map((star) => {
+                  const n = stats.distribution[String(star)] ?? 0
+                  const pct = total > 0 ? Math.round((n / total) * 100) : 0
+                  return (
+                    <tr>
+                      <th style="width:56px">{star}★</th>
+                      <td>
+                        <div style="background:var(--surface-2);border-radius:4px;height:8px;overflow:hidden">
+                          <div style={`background:var(--amber);height:8px;width:${pct}%`}></div>
+                        </div>
+                      </td>
+                      <td class="small muted" style="width:40px">{n}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      }
+    </div>
+
+    <div class="card">
+      <h3>How this data was assembled</h3>
+      <p class="mono small">
+        GET /store/products/{product.id}/reviews<br />
+        x-publishable-api-key: ••••••••
+      </p>
+      <p class="small muted">That route runs, inside Medusa:</p>
+      <pre class="mono small" style="white-space:pre-wrap;margin:0">query.graph({'{'}
+  entity: "product",
+  fields: ["id", "title", "reviews.title", "reviews.rating", ...],
+  filters: {'{'} id: "{product.id}" {'}'}
+{'}'})</pre>
+      <p class="small muted" style="margin-bottom:0">
+        <code>reviews.*</code> crosses a module boundary via the link table defined in
+        <code class="path">apps/commerce/src/links/product-review.ts</code>. No SQL join is possible — the two models
+        live in different module schemas. Delete that link file and the field stops existing.
+      </p>
+    </div>
+  </div>
+
+  <section style="margin-top:40px">
+    <div class="row between">
+      <h2 style="margin:0">Reviews</h2>
+      <a class="btn" href="/reviews#new-review">Write one</a>
+    </div>
+    <p class="small muted">
+      Approved only. The route filters on status itself, because the link table carries no notion of moderation —
+      crossing a module boundary gives you data, not the other module's policy.
+    </p>
+    <div class="grid" style="margin-top:16px">
+      {reviews.map((review) => <ReviewCard review={review} />)}
+    </div>
+    {
+      reviews.length === 0 && (
+        <div class="notice info">
+          <p>Nothing approved for this product yet.</p>
+        </div>
+      )
+    }
+  </section>
+</Layout>
+
+<style>
+  .shot {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+
+  .plans {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+  }
+
+  .plans td {
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+
+  .plans tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .plan-price {
+    text-align: right;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+</style>

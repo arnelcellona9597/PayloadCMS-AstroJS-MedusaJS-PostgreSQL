@@ -1,0 +1,21 @@
+---
+interface Props {
+  name: string
+  ok: boolean
+  detail: string
+  url: string
+  role: string
+}
+
+const { name, ok, detail, url, role } = Astro.props
+---
+
+<div class="card">
+  <div class="row between">
+    <h3>{name}</h3>
+    <span class:list={['badge', ok ? 'ok' : 'down']}>{ok ? 'reachable' : 'unreachable'}</span>
+  </div>
+  <p class="small muted">{role}</p>
+  <p class="small mono">{detail}</p>
+  <a class="btn small" href={url} target="_blank" rel="noopener">Open admin</a>
+</div>

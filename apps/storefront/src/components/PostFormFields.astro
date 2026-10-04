@@ -1,0 +1,79 @@
+---
+import FieldError from './FieldError.astro'
+import type { Category, Post } from '../lib/types'
+
+/**
+ * The shared field set for the create and edit post forms.
+ *
+ * Kept in one component so the two pages cannot drift apart. `errors` is the
+ * `fields` record from `isInputError(result.error)` — Astro Actions hand you
+ * per-field messages, and this is where they get rendered.
+ */
+interface Props {
+  post?: Post | null
+  /** Plain-text version of the post body, for the textarea. */
+  bodyText?: string
+  categories: Category[]
+  errors?: Record<string, string[] | undefined>
+}
+
+const { post, bodyText = '', categories, errors = {} } = Astro.props
+
+const currentCategoryId =
+  post?.category && typeof post.category === 'object' ? post.category.id : (post?.category ?? '')
+---
+
+<div class="field">
+  <label for="title">Title</label>
+  <input type="text" id="title" name="title" value={post?.title ?? ''} required minlength="3" maxlength="200" />
+  <FieldError messages={errors.title} />
+  <span class="hint">
+    Leave the slug alone — Payload derives it from this title in a field-level
+    <code>beforeValidate</code> hook, and never overwrites one you set by hand.
+  </span>
+</div>
+
+<div class="field">
+  <label for="excerpt">Excerpt</label>
+  <input type="text" id="excerpt" name="excerpt" value={post?.excerpt ?? ''} maxlength="300" />
+  <FieldError messages={errors.excerpt} />
+</div>
+
+<div class="field">
+  <label for="body">Body</label>
+  <textarea id="body" name="body" placeholder="Separate paragraphs with a blank line.">{bodyText}</textarea>
+  <FieldError messages={errors.body} />
+  <span class="hint">
+    Payload stores rich text as a Lexical node tree, not HTML. This textarea is converted by
+    <code>toLexical()</code> in <code>src/lib/payload.ts</code> and read back by <code>lexicalToPlainParagraphs()</code>.
+    Formatting added in the CMS admin survives the round trip only as plain text.
+  </span>
+</div>
+
+<div class="field">
+  <label for="category">Category</label>
+  <select id="category" name="category">
+    <option value="">— none —</option>
+    {
+      categories.map((category) => (
+        <option value={category.id} selected={String(category.id) === String(currentCategoryId)}>
+          {category.name}
+        </option>
+      ))
+    }
+  </select>
+  <FieldError messages={errors.category} />
+</div>
+
+<div class="field">
+  <label for="status">Status</label>
+  <select id="status" name="status">
+    <option value="draft" selected={(post?._status ?? 'draft') === 'draft'}>draft</option>
+    <option value="published" selected={post?._status === 'published'}>published</option>
+  </select>
+  <FieldError messages={errors.status} />
+  <span class="hint">
+    Drafts are hidden from anonymous readers by the <code>read</code> access rule on the collection — not by anything in
+    this app.
+  </span>
+</div>

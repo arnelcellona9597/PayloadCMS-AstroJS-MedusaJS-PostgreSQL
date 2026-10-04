@@ -1,0 +1,705 @@
+---
+/**
+ * The single layout for the whole storefront.
+ *
+ * Styles live here as one global stylesheet rather than per-component, because
+ * this project is meant to be READ. Chasing a colour through nine scoped style
+ * blocks teaches nothing about Astro, Payload or Medusa.
+ */
+import { getSiteSettings } from '../lib/payload'
+
+interface Props {
+  title: string
+  subtitle?: string
+  /** Highlights the matching nav item. */
+  section?: 'home' | 'posts' | 'reviews' | 'products' | 'monitor'
+}
+
+const { title, subtitle, section } = Astro.props
+
+/**
+ * The announcement banner comes from a Payload GLOBAL — one record, edited once,
+ * read on every page.
+ *
+ * ── Two honest costs, both worth seeing ───────────────────────────────────
+ *
+ * 1. **This adds a Payload request to every single page render**, including the
+ *    dashboard. That is exactly why globals are the first thing you cache in
+ *    production (docs/learn/09-to-production.md §9.6) — the data changes
+ *    monthly and is fetched thousands of times.
+ *
+ * 2. **It must never take the site down.** A layout that throws breaks every
+ *    page at once, so the failure is swallowed and the banner simply does not
+ *    render. Compare the dashboard, which reports its failures — there, the
+ *    error IS the information; here it would be noise on top of a broken page.
+ */
+let settings: Awaited<ReturnType<typeof getSiteSettings>> | null = null
+
+try {
+  settings = await getSiteSettings()
+} catch {
+  settings = null
+}
+
+const announcement = settings?.announcement?.enabled ? settings.announcement : null
+
+const nav = [
+  { key: 'home', href: '/', label: 'Overview' },
+  { key: 'posts', href: '/posts', label: 'Posts' },
+  { key: 'reviews', href: '/reviews', label: 'Reviews' },
+  { key: 'products', href: '/products', label: 'Products' },
+  { key: 'monitor', href: '/monitor', label: 'Operations' },
+] as const
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title} · Astro + Payload + Medusa</title>
+    <meta name="description" content={subtitle ?? 'A teaching stack for Astro, Payload and Medusa.'} />
+  </head>
+  <body>
+    {
+      announcement && (
+        <div class:list={['announce', announcement.tone ?? 'info']}>
+          <div class="wrap">{announcement.message}</div>
+        </div>
+      )
+    }
+
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href="/">
+          <span class="brand-mark">APM</span>
+          <span class="brand-text">Astro · Payload · Medusa</span>
+        </a>
+        <nav>
+          {
+            nav.map((item) => (
+              <a href={item.href} class:list={['nav-link', { active: section === item.key }]}>
+                {item.label}
+              </a>
+            ))
+          }
+        </nav>
+        <div class="header-links">
+          <a href="http://localhost:3000/admin" target="_blank" rel="noopener">CMS admin</a>
+          <a href="http://localhost:9000/app" target="_blank" rel="noopener">Medusa admin</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <div class="page-head">
+        <h1>{title}</h1>
+        {subtitle && <p class="subtitle">{subtitle}</p>}
+      </div>
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>
+          Server-rendered by Astro on :4321. Content from Payload on :3000. Commerce from Medusa on :9000.
+        </p>
+      </div>
+    </footer>
+
+    <style is:global>
+      :root {
+        --bg: #fbfaf8;
+        --surface: #ffffff;
+        --surface-2: #f4f2ee;
+        --border: #e2ded6;
+        --text: #1c1a17;
+        --text-muted: #6b655c;
+        --accent: #7c3f16;
+        --accent-soft: #f3e6da;
+        --green: #2f6b45;
+        --green-soft: #e3f0e8;
+        --amber: #8a5a10;
+        --amber-soft: #fbeed6;
+        --red: #9c2f2f;
+        --red-soft: #f7e2e2;
+        --radius: 10px;
+        --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+        --sans: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #16150f;
+          --surface: #1f1e17;
+          --surface-2: #282619;
+          --border: #3b382c;
+          --text: #f2efe6;
+          --text-muted: #a7a191;
+          --accent: #e0a878;
+          --accent-soft: #38291c;
+          --green: #8fd0a6;
+          --green-soft: #1e2f24;
+          --amber: #e5be7c;
+          --amber-soft: #322817;
+          --red: #eda3a3;
+          --red-soft: #33201f;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+
+        /* Keeps the footer at the bottom of the viewport on short pages
+           (/products is only ~700px tall) instead of leaving a dead gap. */
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .wrap {
+        width: 100%;
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+
+      /* ── announcement (from the Payload global) ─────────────────────── */
+      .announce {
+        padding: 8px 0;
+        font-size: 13px;
+        text-align: center;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .announce.info { background: var(--surface-2); color: var(--text-muted); }
+      .announce.warning { background: var(--amber-soft); color: var(--amber); }
+
+      /* ── header ─────────────────────────────────────────────────────── */
+      .site-header {
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .header-inner {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        min-height: 60px;
+        flex-wrap: wrap;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        background: var(--accent);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .brand-text {
+        font-size: 14px;
+      }
+
+      .site-header nav {
+        display: flex;
+        gap: 4px;
+        margin-left: auto;
+      }
+
+      .nav-link {
+        padding: 6px 12px;
+        border-radius: 7px;
+        text-decoration: none;
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+
+      .nav-link:hover {
+        background: var(--surface-2);
+        color: var(--text);
+      }
+
+      .nav-link.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .header-links {
+        display: flex;
+        gap: 12px;
+        font-size: 12px;
+      }
+
+      .header-links a {
+        color: var(--text-muted);
+        text-decoration: none;
+      }
+
+      .header-links a:hover {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+
+      /* ── page ───────────────────────────────────────────────────────── */
+      main {
+        padding: 40px 24px 72px;
+        flex: 1;
+      }
+
+      .page-head {
+        margin-bottom: 32px;
+      }
+
+      .page-head h1 {
+        margin: 0 0 6px;
+        font-size: 30px;
+        line-height: 1.2;
+        letter-spacing: -0.015em;
+      }
+
+      .subtitle {
+        margin: 0;
+        color: var(--text-muted);
+        max-width: 70ch;
+      }
+
+      .site-footer {
+        border-top: 1px solid var(--border);
+        padding: 20px 0;
+        color: var(--text-muted);
+        font-size: 13px;
+      }
+
+      .site-footer p {
+        margin: 0;
+      }
+
+      /* ── cards & layout helpers ─────────────────────────────────────── */
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px;
+      }
+
+      /* A card's last child must not add its own bottom margin, or cards whose
+         content ends in a <p> get 16px more padding than ones ending in a
+         button — which then makes sibling cards in a grid row uneven. */
+      .card > *:last-child {
+        margin-bottom: 0;
+      }
+
+      /* Stacking margin for cards that follow one another in normal flow. */
+      .card + .card {
+        margin-top: 16px;
+      }
+
+      /* ...but NOT inside a grid, where `gap` already handles spacing.
+         This is not merely redundant there — it is actively wrong. A grid item
+         with a block-direction margin stretches to (row height − margin), so
+         every card after the first came out 16px shorter AND 16px lower than
+         its neighbours, while `align-items: stretch` looked like it was being
+         ignored. Same applies to flex rows. */
+      .grid > .card + .card,
+      .row > .card + .card {
+        margin-top: 0;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+        /* Explicit rather than relying on `normal`: every card in a row gets the
+           same height and the same top edge. */
+        align-items: stretch;
+      }
+
+      .grid.cols-2 {
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      }
+
+      .grid.cols-3 {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      .grid.cols-4 {
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .row.between {
+        justify-content: space-between;
+      }
+
+      /* Table action buttons: keep them on one line. `.row` wraps by default,
+         which pushed the 4th button onto its own row and made the table ragged. */
+      .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+        flex-wrap: nowrap;
+      }
+
+      td.actions-cell {
+        white-space: nowrap;
+        width: 1%;
+      }
+
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .muted {
+        color: var(--text-muted);
+      }
+
+      .small {
+        font-size: 13px;
+      }
+
+      .mono {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      /* ── badges ─────────────────────────────────────────────────────── */
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: lowercase;
+        letter-spacing: 0.02em;
+      }
+
+      .badge.approved,
+      .badge.published,
+      .badge.ok {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .badge.pending,
+      .badge.draft {
+        background: var(--amber-soft);
+        color: var(--amber);
+      }
+
+      .badge.rejected,
+      .badge.down {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .badge.neutral {
+        background: var(--surface-2);
+        color: var(--text-muted);
+      }
+
+      /* ── buttons ────────────────────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        font-size: 14px;
+        font-family: inherit;
+        text-decoration: none;
+        cursor: pointer;
+      }
+
+      .btn:hover {
+        background: var(--surface-2);
+      }
+
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+
+      .btn.primary:hover {
+        filter: brightness(1.08);
+      }
+
+      .btn.danger {
+        color: var(--red);
+        border-color: var(--red-soft);
+      }
+
+      .btn.danger:hover {
+        background: var(--red-soft);
+      }
+
+      .btn.small {
+        padding: 4px 10px;
+        font-size: 13px;
+      }
+
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* ── forms ──────────────────────────────────────────────────────── */
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 18px;
+      }
+
+      .field label {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .field .hint {
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      input[type='text'],
+      input[type='email'],
+      input[type='number'],
+      select,
+      textarea {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 14px;
+      }
+
+      textarea {
+        min-height: 140px;
+        resize: vertical;
+        line-height: 1.55;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+        border-color: var(--accent);
+      }
+
+      .error-text {
+        color: var(--red);
+        font-size: 12px;
+      }
+
+      /* ── notices ────────────────────────────────────────────────────── */
+      .notice {
+        border-radius: 8px;
+        padding: 12px 14px;
+        font-size: 14px;
+        margin-bottom: 20px;
+        border: 1px solid transparent;
+      }
+
+      .notice.success {
+        background: var(--green-soft);
+        color: var(--green);
+      }
+
+      .notice.error {
+        background: var(--red-soft);
+        color: var(--red);
+      }
+
+      .notice.info {
+        background: var(--surface-2);
+        color: var(--text-muted);
+        border-color: var(--border);
+      }
+
+      .notice p {
+        margin: 0;
+      }
+
+      /* ── tables ─────────────────────────────────────────────────────── */
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--surface);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        background: var(--surface-2);
+      }
+
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* ── prose (rendered Lexical output) ────────────────────────────── */
+      .prose {
+        max-width: 68ch;
+      }
+
+      .prose p {
+        margin: 0 0 1em;
+      }
+
+      .prose h2,
+      .prose h3 {
+        margin: 1.6em 0 0.5em;
+        line-height: 1.25;
+      }
+
+      .prose blockquote {
+        margin: 1.2em 0;
+        padding-left: 16px;
+        border-left: 3px solid var(--accent);
+        color: var(--text-muted);
+      }
+
+      .prose code {
+        font-family: var(--mono);
+        font-size: 0.9em;
+        background: var(--surface-2);
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+
+      .prose a {
+        color: var(--accent);
+      }
+
+      /* ── the React island (src/components/ReviewFilter.tsx) ─────────── */
+      .rf { display: flex; flex-direction: column; gap: 12px; }
+
+      .rf-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+      .rf-controls input { flex: 1 1 220px; }
+      .rf-controls select { flex: 0 0 auto; width: auto; }
+
+      .rf-count { margin: 0; font-size: 13px; color: var(--text-muted); }
+
+      .rf-reset {
+        margin-left: 8px;
+        background: none;
+        border: 0;
+        padding: 0;
+        color: var(--accent);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+        text-decoration: underline;
+      }
+
+      .rf-empty { margin: 0; font-size: 13px; color: var(--text-muted); }
+
+      .rf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+      .rf-list li {
+        display: grid;
+        grid-template-columns: 5.5rem minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 10px;
+        font-size: 14px;
+        padding: 6px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .rf-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rf-stars { color: var(--amber); white-space: nowrap; }
+      .rf-author { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+
+      /* ── misc ───────────────────────────────────────────────────────── */
+      .stars {
+        color: var(--amber);
+        letter-spacing: 1px;
+      }
+
+      code.path {
+        font-family: var(--mono);
+        font-size: 12px;
+        background: var(--surface-2);
+        padding: 2px 6px;
+        border-radius: 4px;
+        color: var(--text-muted);
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      h2 {
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+
+      h3 {
+        font-size: 16px;
+        margin: 0 0 8px;
+      }
+    </style>
+  </body>
+</html>

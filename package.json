@@ -1,0 +1,38 @@
+{
+  "name": "astro-payload-medusa",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A teaching stack: Astro 7 storefront over a Medusa 2 commerce backend and a Payload 3 CMS. Each service implements CRUD + REST in its own idiom so the architectures can be compared side by side.",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "bootstrap:commerce": "npm --prefix apps/commerce run bootstrap",
+    "db:down": "docker compose -f infra/docker-compose.yml down",
+    "db:psql": "docker exec -it apm-postgres psql -U postgres",
+    "db:reset": "docker compose -f infra/docker-compose.yml down -v && npm run db:up",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d --wait",
+    "dev": "concurrently -n cms,commerce,store -c magenta,cyan,yellow \"npm:dev:cms\" \"npm:dev:commerce\" \"npm:dev:storefront\"",
+    "dev:cms": "mkdir -p logs && npm --prefix apps/cms run dev 2>&1 | tee logs/cms.log",
+    "dev:commerce": "mkdir -p logs && npm --prefix apps/commerce run dev 2>&1 | tee logs/commerce.log",
+    "dev:storefront": "mkdir -p logs && npm --prefix apps/storefront run dev 2>&1 | tee logs/storefront-launch.log",
+    "install:all": "npm --prefix apps/cms install && npm --prefix apps/commerce install && npm --prefix apps/storefront install",
+    "logs": "tail -n 60 -f logs/cms.log logs/commerce.log apps/storefront/.astro/dev.log",
+    "logs:errors": "grep -ihE 'error|fatal|warn' logs/cms.log logs/commerce.log apps/storefront/.astro/dev.log | tail -40",
+    "postman:env": "bash scripts/gen-postman-env.sh",
+    "postman:test": "npx --yes newman run postman/astro-payload-medusa.postman_collection.json -e postman/local.postman_environment.json --color on",
+    "reset:all": "npm run db:reset && npm run setup && npm run postman:env",
+    "seed:cms": "npm --prefix apps/cms run seed",
+    "seed:commerce": "npm --prefix apps/commerce run seed",
+    "setup": "bash scripts/setup.sh",
+    "test": "npm --prefix apps/storefront run test && npm --prefix apps/commerce run test:compensation",
+    "test:compensation": "npm --prefix apps/commerce run test:compensation",
+    "test:unit": "npm --prefix apps/storefront run test",
+    "typecheck": "npm --prefix apps/cms run typecheck && npm --prefix apps/commerce run typecheck && npm --prefix apps/storefront run typecheck",
+    "db:export": "bash scripts/db-export.sh",
+    "db:import": "bash scripts/db-import.sh"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

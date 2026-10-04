@@ -1,0 +1,56 @@
+# Postgres for both backends.
+#
+# Port 5433 (not 5432) on purpose: this machine already has a local
+# PostgreSQL 18 service on 5432 and ddev containers bound to other ports.
+# Mapping to 5433 means this stack never fights with either of them.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: apm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - apm-pgdata:/var/lib/postgresql/data
+      # Files in this directory run ONLY on first initialisation of an
+      # empty data volume. If you change 01-databases.sql you must run
+      # `npm run db:reset` (which deletes the volume) for it to take effect.
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ───────────────────────────────────────────────────────────────
+  # Not optional once you care about correctness. Medusa runs three subsystems
+  # in-process without it — the event bus, workflow locking, and the workflow
+  # engine — and all three break the moment there is more than one instance.
+  #
+  # The workflow engine is the one that matters most here: the in-memory engine
+  # does not persist executions at all, so `workflow_execution` stays empty and
+  # there is no such thing as a "pending" or "failed" workflow to look at. With
+  # Redis it records every run. See docs/learn/12-operating-it.md.
+  redis:
+    image: redis:7-alpine
+    container_name: apm-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # No persistence configured on purpose: everything in here is derived state
+    # (cache entries, in-flight workflow bookkeeping, locks). Losing it on a
+    # restart is acceptable; losing Postgres is not.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  apm-pgdata:

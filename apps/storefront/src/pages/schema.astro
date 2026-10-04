@@ -1,0 +1,275 @@
+---
+import Layout from '../layouts/Layout.astro'
+import StatTile from '../components/StatTile.astro'
+import { getPayloadSchema } from '../lib/payload'
+import { getMedusaSchema } from '../lib/medusa-admin'
+
+export const prerender = false
+
+/**
+ * A live view of both databases.
+ *
+ * ── The constraint that shapes this page ──────────────────────────────────
+ *
+ * Astro does not have a database connection, and deliberately never will. It
+ * would be trivial to `import pg` here and read both schemas directly — and it
+ * would quietly demolish the rule the rest of the repo teaches: the frontend
+ * owns no data and reaches backends over HTTP only.
+ *
+ * So each backend introspects the database it owns and exposes it:
+ *   Payload → GET /api/schema        (apps/cms/src/endpoints/schema.ts)
+ *   Medusa  → GET /admin/schema      (apps/commerce/src/api/admin/schema/route.ts)
+ *
+ * This page composes the two. That is the same job it does for posts and
+ * reviews — only the subject matter is different.
+ */
+
+type Settled<T> = { ok: true; value: T } | { ok: false; error: string }
+
+async function settle<T>(work: () => Promise<T>): Promise<Settled<T>> {
+  try {
+    return { ok: true, value: await work() }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+}
+
+const [payload, medusa] = await Promise.all([
+  settle(() => getPayloadSchema()),
+  settle(() => getMedusaSchema()),
+])
+
+const fmtBytes = (n: number) =>
+  n >= 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.round(n / 1024)} kB`
+
+// Payload: group by what produced each table — the whole point of the page.
+const payloadGroups = payload.ok
+  ? ['collection', 'sub-table', 'versions', 'auth', 'relationships', 'internal']
+      .map((kind) => ({
+        kind,
+        tables: payload.value.tables.filter((t) => t.kind === kind),
+      }))
+      .filter((g) => g.tables.length > 0)
+  : []
+
+const kindLabel: Record<string, string> = {
+  collection: 'Your collections',
+  'sub-table': 'Array / blocks sub-tables',
+  versions: 'Drafts & versions',
+  auth: 'Auth',
+  relationships: 'Relationship storage',
+  internal: "Payload's own bookkeeping",
+}
+---
+
+<Layout
+  title="Schema explorer"
+  subtitle="Both databases, described by the backends that own them. Astro holds no connection of its own."
+  section="home"
+>
+  <section>
+    <div class="grid cols-4">
+      <StatTile
+        label="Payload tables"
+        value={payload.ok ? payload.value.tableCount : '—'}
+        note={payload.ok ? `from ${payload.value.collections.yours.length} declared collections` : 'unreachable'}
+        tone={payload.ok ? 'neutral' : 'down'}
+      />
+      <StatTile
+        label="Medusa tables"
+        value={medusa.ok ? medusa.value.tableCount : '—'}
+        note={medusa.ok ? `${Object.keys(medusa.value.byModule).length}+ modules` : 'unreachable'}
+        tone={medusa.ok ? 'neutral' : 'down'}
+      />
+      <StatTile
+        label="Cross-module links"
+        value={medusa.ok ? medusa.value.declaredLinkCount : '—'}
+        note={medusa.ok ? `all ${medusa.value.crossModuleLinkCount} truly cross-module` : '—'}
+      />
+      <StatTile
+        label="Soft-delete tables"
+        value={medusa.ok ? medusa.value.softDeleteTableCount : '—'}
+        note={medusa.ok ? `of ${medusa.value.tableCount} — deleted_at is the norm` : '—'}
+      />
+    </div>
+  </section>
+
+  <!-- ── Payload ─────────────────────────────────────────────────────────── -->
+  <section style="margin-top:32px">
+    <h2>payload_crud</h2>
+    {
+      payload.ok ? (
+        <>
+          <p class="small muted">
+            You declared <strong>{payload.value.collections.yours.length}</strong> collections
+            ({payload.value.collections.yours.join(', ')}) and they became{' '}
+            <strong>{payload.value.tableCount}</strong> tables. Every extra one has a cause —
+            grouped below by what produced it.
+          </p>
+          <p class="small muted">
+            Payload also injects <strong>{payload.value.collections.injectedByPayload.length}</strong>{' '}
+            collections of its own: <code>{payload.value.collections.injectedByPayload.join(', ')}</code>.
+          </p>
+
+          <div class="stack-l" style="margin-top:20px">
+            {payloadGroups.map((group) => (
+              <div>
+                <p class="group-head">
+                  {kindLabel[group.kind] ?? group.kind}
+                  <span class="muted"> · {group.tables.length}</span>
+                </p>
+                <p class="small muted" style="margin:0 0 10px">{group.tables[0].origin}</p>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr><th>Table</th><th>Columns</th><th>Size</th></tr>
+                    </thead>
+                    <tbody>
+                      {group.tables.map((t) => (
+                        <tr>
+                          <td class="mono">{t.name}</td>
+                          <td class="num">{t.columnCount}</td>
+                          <td class="num muted">{fmtBytes(t.bytes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div class="notice error"><p>Payload unreachable — {payload.error}</p></div>
+      )
+    }
+  </section>
+
+  <!-- ── Medusa ──────────────────────────────────────────────────────────── -->
+  <section style="margin-top:32px">
+    <h2>medusa_crud</h2>
+    {
+      medusa.ok ? (
+        <>
+          <p class="small muted">
+            <strong>{medusa.value.tableCount}</strong> tables, partitioned by module. You wrote one
+            of them (<code>review</code>); Medusa ships the rest.
+          </p>
+
+          <div class="grid cols-2" style="margin-top:16px">
+            <div class="card">
+              <h3>Tables per module</h3>
+              <div class="table-wrap" style="border:0">
+                <table>
+                  <tbody>
+                    {Object.entries(medusa.value.byModule).map(([mod, count]) => (
+                      <tr>
+                        <td class="mono">{mod}</td>
+                        <td class="num">{count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p class="small muted" style="margin-bottom:0">
+                Inferred from the table-name prefix — Medusa does not record module ownership in
+                the database, so this is a heuristic.
+              </p>
+            </div>
+
+            <div class="card">
+              <h3>Cross-module links</h3>
+              <p class="small muted" style="margin-top:0">
+                Medusa records these itself in <code>link_module_migrations</code> — so this is
+                fact, not inference. <strong>{medusa.value.declaredLinkCount}</strong> declared
+                links, and yours sits among Medusa's own.
+              </p>
+              <div class="link-list">
+                {medusa.value.declaredLinks.map((l) => (
+                  <div class:list={['link-row', { mine: l.table === 'product_product_review_review' }]}>
+                    <span class="mono">{l.table}</span>
+                    <span class="small muted">{l.from} → {l.to}</span>
+                  </div>
+                ))}
+              </div>
+              <p class="small muted" style="margin-bottom:0">
+                Shape-matching would have guessed <strong>{medusa.value.linkShapedCount}</strong> —
+                it cannot tell a cross-module link from a within-module join table like
+                <code>product_tags</code>. That gap between
+                {' '}{medusa.value.linkShapedCount} and {medusa.value.declaredLinkCount} is why the
+                declared list is the one to trust.
+              </p>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div class="notice error"><p>Medusa unreachable — {medusa.error}</p></div>
+      )
+    }
+  </section>
+
+  <section style="margin-top:32px">
+    {
+      medusa.ok && (
+        <div class="card" style="margin-bottom:16px">
+          <h3>Medusa keeps three migration histories</h3>
+          <div class="table-wrap" style="border:0">
+            <table>
+              <tbody>
+                <tr><td class="mono">mikro_orm_migrations</td><td class="num">{medusa.value.migrationTables.mikro_orm_migrations}</td><td class="small muted">module schema changes</td></tr>
+                <tr><td class="mono">link_module_migrations</td><td class="num">{medusa.value.migrationTables.link_module_migrations}</td><td class="small muted">link tables — created by db:migrate, not db:generate</td></tr>
+                <tr><td class="mono">script_migrations</td><td class="num">{medusa.value.migrationTables.script_migrations}</td><td class="small muted">one-off data migration scripts</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small muted" style="margin-bottom:0">
+            This is why <code>db:generate</code> and <code>db:migrate</code> are separate commands,
+            and why adding a link needs only the second.
+          </p>
+        </div>
+      )
+    }
+    <div class="card">
+      <h3>Two schema strategies</h3>
+      <div class="table-wrap" style="border:0">
+        <table>
+          <thead><tr><th></th><th>Payload</th><th>Medusa</th></tr></thead>
+          <tbody>
+            <tr><td>How the schema changes</td><td><code>push</code> diffs the config</td><td>generated migration files</td></tr>
+            <tr><td>Artefact in git</td><td class="muted">none</td><td>one file per change, with <code>down()</code></td></tr>
+            <tr><td>Primary key</td><td><code>integer</code>, serial</td><td><code>text</code>, app-generated ULID</td></tr>
+            <tr><td>Deletes</td><td>hard, by default</td><td><strong>soft</strong> — <code>deleted_at</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small muted" style="margin-bottom:0">
+        Full explanation in <code class="path">docs/learn/10-databases.md</code>.
+      </p>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .group-head { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .link-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; margin: 10px 0; }
+
+  .link-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 13px;
+  }
+
+  /* The one you wrote, highlighted among the ones Medusa ships. */
+  .link-row.mine {
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .link-row.mine .muted { color: var(--accent); }
+</style>

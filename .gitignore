@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.next/
+.medusa/
+.astro/
+build/
+*.log
+.env
+.env.local
+.env.*.local
+apps/cms/public/media/
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# Postman env holds real (dev-only) keys; regenerate with `npm run postman:env`
+postman/local.postman_environment.json
+
+# Dev server output, teed by the dev scripts for the log viewer
+logs/
+
+# Database dumps from `npm run db:export`
+backups/
