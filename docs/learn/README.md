@@ -28,6 +28,7 @@ specific task rather than the explanation behind it, there is a cookbook:
 | 10 | [10-databases.md](10-databases.md) | Both schemas opened up: why 5 collections became 21 tables, Medusa's 145, link tables, ID strategies. Explore it live at `/schema`. | 2–3 h |
 | 11 | [11-capstone.md](11-capstone.md) | **Build a feature across all three services.** Requirements and acceptance criteria only — no solution. | 4–8 h |
 | 12 | [12-operating-it.md](12-operating-it.md) | Uptime, request logs, workflow states, log viewer and backups — and where each signal is blind. Live at `/monitor`. | 2–3 h |
+| 13 | [13-deploying-it.md](13-deploying-it.md) | **Put it on a real server.** VPS sizing from measured numbers, hardening, systemd, Caddy and TLS, and closing the gaps chapter 9 names. | 3–4 h |
 
 The reference docs — [`../../README.md`](../../README.md),
 [`../architecture.md`](../architecture.md), [`../rest-api.md`](../rest-api.md),
