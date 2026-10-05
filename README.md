@@ -447,6 +447,22 @@ npm --prefix apps/commerce run bootstrap    # print the publishable key
 
 ---
 
+## Deploying
+
+Three services, two databases and one reverse proxy on a single VPS —
+[`docs/learn/13-deploying-it.md`](docs/learn/13-deploying-it.md) has the whole
+sequence, sized from measured numbers rather than estimates:
+
+| | Measured |
+|---|---|
+| Runtime, all three services | **834 MB** |
+| Build peak (Payload/Next, the binding constraint) | **2.34 GB** |
+
+⚠️ **Buy 4 GB, not 2.** 2 GB runs the stack and then fails on the first build —
+which is exactly why shared hosting that looks adequate is not.
+
+---
+
 ## Branches and contributing
 
 Three tiers, and work only ever enters at the bottom.
