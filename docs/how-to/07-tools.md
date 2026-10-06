@@ -790,7 +790,7 @@ curl -s "$SF/api/health" \
 ```
 
 ```
-True 88 posts (3 draft), authenticated as admin@local.test
+True 103 posts (3 draft), authenticated as admin@local.test
 ```
 
 Healthy, and reachable — it was only ever the *monitor* that was looking in the

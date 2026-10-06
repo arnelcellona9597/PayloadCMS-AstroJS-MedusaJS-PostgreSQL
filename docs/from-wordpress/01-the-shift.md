@@ -735,7 +735,7 @@ for name, s in d["services"].items():
 payload      HTTP up — 85 posts visible anonymously
 medusa       OK (HTTP 200)
 astro        ok = True
-               └─ payload  ok=True  88 posts (3 draft), authenticated as admin@local.test
+               └─ payload  ok=True  103 posts (3 draft), authenticated as admin@local.test
                └─ medusa   ok=True  33 approved reviews, products reachable
 ```
 

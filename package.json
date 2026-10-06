@@ -30,7 +30,8 @@
     "test:unit": "npm --prefix apps/storefront run test",
     "typecheck": "npm --prefix apps/cms run typecheck && npm --prefix apps/commerce run typecheck && npm --prefix apps/storefront run typecheck",
     "db:export": "bash scripts/db-export.sh",
-    "db:import": "bash scripts/db-import.sh"
+    "db:import": "bash scripts/db-import.sh",
+    "guides:check": "npm --prefix apps/cms run guides:check"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

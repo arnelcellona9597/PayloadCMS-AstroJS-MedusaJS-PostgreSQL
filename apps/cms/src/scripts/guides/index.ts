@@ -11,7 +11,9 @@
  */
 import type { DatedGuide, Guide } from './types'
 
+import { installationAndSetup } from './installation-and-setup'
 import { gettingStarted } from './getting-started'
+import { keyFiles } from './key-files'
 import { contentModelling } from './content-modelling'
 import { frontend } from './frontend'
 import { commerce } from './commerce'
@@ -25,7 +27,11 @@ import { testing } from './testing'
 export type { Guide, DatedGuide } from './types'
 
 /**
- * Ten categories. These map onto how someone actually looks for an answer: by
+ * Twelve categories, listed in the same order as the curriculum below — the
+ * storefront renders its filter chips straight from this array, so the order
+ * here is what a reader sees. check-guides.ts asserts the two agree.
+ *
+ * Originally ten. These map onto how someone actually looks for an answer: by
  * the part of the stack they are stuck in.
  *
  * ⚠️ Every name here needs a colour in `ACCENTS` in ../placeholders.ts. An
@@ -34,8 +40,17 @@ export type { Guide, DatedGuide } from './types'
  */
 export const categorySeeds = [
   {
+    name: 'Installation & Setup',
+    description: 'Prerequisites, the setup script, ports, containers and what to do when it fails.',
+  },
+  {
     name: 'Getting Started',
     description: 'Orientation, project structure, and the commands you will type every day.',
+  },
+  {
+    name: 'Key Files & Folders',
+    description:
+      'The map: which files matter in each app, what every env var does, what is generated.',
   },
   {
     name: 'Content Modelling',
@@ -46,32 +61,32 @@ export const categorySeeds = [
     description: 'Astro routing, pages, layouts, components and islands.',
   },
   {
-    name: 'Commerce',
-    description: 'Medusa products, payments, inventory and multi-store.',
-  },
-  {
     name: 'Data & APIs',
     description: 'Reading, writing and deleting across two backends over HTTP.',
+  },
+  {
+    name: 'Commerce',
+    description: 'Medusa products, payments, inventory and multi-store.',
   },
   {
     name: 'Operations & Tooling',
     description: 'Databases, backups, monitoring, editors and the things that keep it running.',
   },
   {
-    name: 'Deployment & Infrastructure',
-    description: 'Server sizing, hardening, TLS, process supervision and shipping a change.',
-  },
-  {
-    name: 'Security',
-    description: 'Authentication, secrets, CORS, injection, rate limiting and headers.',
+    name: 'Testing & Quality',
+    description: 'Unit, integration and end-to-end tests, fixtures, and gates that actually gate.',
   },
   {
     name: 'Performance',
     description: 'Query cost, indexes, pooling, caching layers and measuring before optimising.',
   },
   {
-    name: 'Testing & Quality',
-    description: 'Unit, integration and end-to-end tests, fixtures, and gates that actually gate.',
+    name: 'Security',
+    description: 'Authentication, secrets, CORS, injection, rate limiting and headers.',
+  },
+  {
+    name: 'Deployment & Infrastructure',
+    description: 'Server sizing, hardening, TLS, process supervision and shipping a change.',
   },
 ] as const
 
@@ -84,14 +99,23 @@ const at = (hoursFromStart: number) => {
 }
 
 /**
- * Order matters: it becomes `publishedAt`, and the storefront sorts on it.
+ * This array IS the curriculum. Position here becomes `order` on every post,
+ * and the storefront's archive sorts on it ascending — so guide 1 is the first
+ * thing a newcomer sees and the last assumes everything before it.
  *
- * The foundational categories come first so that the newest-first archive opens
- * on the specialised material — deployment, security, performance — with the
- * orientation guides further back where someone browsing already knows to look.
+ * It previously ran the other way. Position became `publishedAt`, the archive
+ * sorted `-publishedAt`, and the effect was an archive that opened on server
+ * hardening and buried "what to install" eighty guides down. That is a fine
+ * ordering for a news feed and a terrible one for teaching.
+ *
+ * The progression: install it, understand its shape, learn the map, then model
+ * content, render it, wire the services together, sell something, operate it,
+ * test it, make it fast, make it safe, and ship it.
  */
 const ordered: Guide[] = [
+  ...installationAndSetup,
   ...gettingStarted,
+  ...keyFiles,
   ...contentModelling,
   ...frontend,
   ...dataAndApis,
@@ -104,14 +128,23 @@ const ordered: Guide[] = [
 ]
 
 /**
- * Stamp each guide with a date derived from its position.
+ * Stamp each guide with its curriculum position and a date, both derived from
+ * array index so neither can drift from the list above.
  *
- * Hand-numbered offsets worked at 32 guides and became a liability at 88: one
- * duplicate silently collapses two guides onto the same timestamp and makes
- * `sort: '-publishedAt'` arbitrary between them. Deriving it from the index
- * means the ordering above *is* the ordering, and cannot drift from it.
+ * `order` is 1-based because it is shown to readers as "step 7 of 103", and a
+ * step 0 reads badly. `publishedAt` stays in the same direction, so the
+ * secondary "newest first" view is a coherent reverse of the path rather than
+ * an arbitrary shuffle.
+ *
+ * Hand-numbering either of these was the previous approach. It worked at 32
+ * guides and became a liability at 88: one duplicate silently collapses two
+ * guides onto the same key and makes the sort arbitrary between them.
  */
 export const guideSeeds: DatedGuide[] = ordered.map((guide, i) => ({
   ...guide,
+  order: i + 1,
   publishedAt: at(i),
 }))
+
+/** How many guides there are, for anything that wants to say "of 103". */
+export const guideCount = guideSeeds.length

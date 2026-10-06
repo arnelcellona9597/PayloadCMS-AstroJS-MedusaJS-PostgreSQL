@@ -186,7 +186,7 @@ curl -s -m 15 "$SF/api/health" | python3 -m json.tool
     "services": {
         "payload": {
             "ok": true,
-            "detail": "88 posts (3 draft), authenticated as admin@local.test",
+            "detail": "103 posts (3 draft), authenticated as admin@local.test",
             "url": "http://localhost:3000"
         },
         "medusa": {

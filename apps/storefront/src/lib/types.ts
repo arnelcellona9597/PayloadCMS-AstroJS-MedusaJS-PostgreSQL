@@ -91,6 +91,15 @@ export type Post = {
   coverImage?: number | Media | null
   tags?: { id?: string; tag: string }[] | null
   publishedAt?: string | null
+  /**
+   * Curriculum position, 1-based. The archive's default sort.
+   *
+   * Optional because a post created through the admin panel has no reason to
+   * carry one — only the seeded guides form a reading path. Payload sorts nulls
+   * last on an ascending sort, so an ad-hoc post lands after the curriculum
+   * rather than silently at the front.
+   */
+  order?: number | null
   _status?: 'draft' | 'published'
   createdAt: string
   updatedAt: string

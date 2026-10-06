@@ -360,6 +360,12 @@ const seed = async () => {
          * would return them in an arbitrary order.
          */
         publishedAt: guide.publishedAt,
+        /**
+         * Curriculum position. The storefront archive sorts on this ascending,
+         * so this is what makes the guides read in a teaching order rather than
+         * a publication order.
+         */
+        order: guide.order,
         _status: guide.status,
       },
     })

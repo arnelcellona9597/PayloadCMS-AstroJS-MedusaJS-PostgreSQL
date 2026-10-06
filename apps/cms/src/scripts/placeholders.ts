@@ -30,7 +30,9 @@ const HEIGHT = 864
  * covers do not fight the UI they appear in.
  */
 const ACCENTS: Record<string, string> = {
+  'Installation & Setup': '#1f6b3f',
   'Getting Started': '#7c3f16',
+  'Key Files & Folders': '#6b4a1f',
   'Content Modelling': '#2f6b45',
   Frontend: '#8a5a10',
   Commerce: '#9c2f2f',

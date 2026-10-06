@@ -65,4 +65,14 @@ export type Guide = {
  * breaks `sort: '-publishedAt'`. index.ts now stamps them from array position,
  * so the ordering is a property of the list rather than something to maintain.
  */
-export type DatedGuide = Guide & { publishedAt: string }
+export type DatedGuide = Guide & {
+  publishedAt: string
+  /**
+   * Curriculum position, 1-based. The archive's default sort.
+   *
+   * Separate from `publishedAt` on purpose: "when was this written" and "where
+   * does it belong in the path" are different questions, and a guide can be
+   * revised today without ceasing to be step 3.
+   */
+  order: number
+}

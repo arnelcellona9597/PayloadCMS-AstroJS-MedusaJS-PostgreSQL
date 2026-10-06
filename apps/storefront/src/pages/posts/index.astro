@@ -39,6 +39,22 @@ const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1)
 const categoryParam = url.searchParams.get('category')
 const categoryId = categoryParam ? Number(categoryParam) || undefined : undefined
 
+/**
+ * Two orderings, and the default is the teaching one.
+ *
+ * `order` is an explicit curriculum position on the collection, so guide 1 is
+ * genuinely the first thing to read. This page used to sort `-publishedAt`,
+ * which made the seed's array order the reading order by accident — and
+ * backwards, so the archive opened on server hardening and buried "what to
+ * install" ninety guides down.
+ *
+ * ⚠️ `order` is nullable: a post created in the admin panel has no curriculum
+ * position. Postgres sorts NULLs last on an ascending sort, so those land after
+ * the path rather than silently in front of it.
+ */
+const sortMode = url.searchParams.get('sort') === 'new' ? 'new' : 'path'
+const sort = sortMode === 'new' ? '-publishedAt' : 'order'
+
 const [{ docs: categories }, result] = await Promise.all([
   listCategories(),
   listPosts({
@@ -46,7 +62,7 @@ const [{ docs: categories }, result] = await Promise.all([
     page,
     depth: 1,
     includeDrafts: true,
-    sort: '-publishedAt',
+    sort,
     categoryId,
   }),
 ])
@@ -54,11 +70,13 @@ const [{ docs: categories }, result] = await Promise.all([
 const { docs: posts, totalDocs, totalPages, hasPrevPage, hasNextPage } = result
 
 /** Preserve the other parameter when switching one of them. */
-const href = (next: { page?: number; category?: number | 'all' }) => {
+const href = (next: { page?: number; category?: number | 'all'; sort?: 'path' | 'new' }) => {
   const q = new URLSearchParams()
   const cat = next.category === undefined ? categoryId : next.category === 'all' ? undefined : next.category
   if (cat !== undefined) q.set('category', String(cat))
   if (next.page !== undefined && next.page > 1) q.set('page', String(next.page))
+  const s = next.sort ?? sortMode
+  if (s === 'new') q.set('sort', 'new')
   const qs = q.toString()
   return qs ? `/posts?${qs}` : '/posts'
 }
@@ -116,6 +134,24 @@ const fmt = (iso: string) =>
     }
   </div>
 
+  <div class="row between sortbar">
+    <p class="small muted" style="margin:0">
+      {
+        sortMode === 'path'
+          ? 'Sorted by reading order — start at the top and work down.'
+          : 'Sorted newest first, which is the reverse of the reading order.'
+      }
+    </p>
+    <div class="row" style="gap:6px">
+      <a class:list={['btn', 'small', { active: sortMode === 'path' }]} href={href({ sort: 'path', page: 1 })}>
+        Learning path
+      </a>
+      <a class:list={['btn', 'small', { active: sortMode === 'new' }]} href={href({ sort: 'new', page: 1 })}>
+        Newest first
+      </a>
+    </div>
+  </div>
+
   {
     posts.length === 0 ? (
       <div class="notice info">
@@ -129,6 +165,7 @@ const fmt = (iso: string) =>
         <table>
           <thead>
             <tr>
+              <th style="width:1%">#</th>
               <th>Title</th>
               <th>Category</th>
               <th>Status</th>
@@ -139,6 +176,9 @@ const fmt = (iso: string) =>
           <tbody>
             {posts.map((post) => (
               <tr>
+                <td class="step-cell">
+                  {post.order ? <span class="step">{post.order}</span> : <span class="muted small">—</span>}
+                </td>
                 <td>
                   <div class="title-cell">
                     {/* depth:1 on the list query is what makes this a URL rather than an id. */}
@@ -225,7 +265,7 @@ const fmt = (iso: string) =>
       Every row above came from one request in this page's frontmatter:
     </p>
     <p class="mono small">
-      GET http://localhost:3000/api/posts?limit=20&page=1&depth=1&sort=-publishedAt<br />
+      GET http://localhost:3000/api/posts?limit={PER_PAGE}&page={page}&depth=1&sort={sort}<br />
       Authorization: users API-Key ••••••••
     </p>
     <p class="small muted" style="margin-bottom:0">
@@ -269,6 +309,24 @@ const fmt = (iso: string) =>
     cursor: default;
   }
 
+  .sortbar {
+    margin: 10px 0 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .step-cell {
+    text-align: right;
+    vertical-align: top;
+    padding-top: 14px;
+  }
+  /* Tabular numerals so the column stays a straight edge from 1 to 103. */
+  .step {
+    font-family: var(--mono, ui-monospace, monospace);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    color: var(--muted, #8a8372);
+  }
   .pager {
     margin-top: 22px;
     align-items: center;

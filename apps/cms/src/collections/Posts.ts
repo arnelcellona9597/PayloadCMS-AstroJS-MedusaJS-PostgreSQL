@@ -120,6 +120,28 @@ export const Posts: CollectionConfig = {
         date: { pickerAppearance: 'dayAndTime' },
       },
     },
+    {
+      /**
+       * Curriculum position — "what should I read first", as data.
+       *
+       * This exists because the storefront was sorting the archive on
+       * `publishedAt`, which made the seed's array order the reading order by
+       * accident. That conflates two genuinely different questions: *when was
+       * this written* and *where does it belong in the path*. A guide can be
+       * revised today and still be step 3.
+       *
+       * Indexed because it is the archive's default sort, and the whole
+       * collection is ordered by it on every list request.
+       */
+      name: 'order',
+      type: 'number',
+      index: true,
+      admin: {
+        position: 'sidebar',
+        description:
+          'Reading position in the learning path. Lower is earlier. Leave empty for standalone posts — they sort to the end.',
+      },
+    },
   ],
 
   hooks: {

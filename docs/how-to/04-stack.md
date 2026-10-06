@@ -389,7 +389,7 @@ curl -s "$SF/api/health" \
 
 ```
 True
-88 posts (3 draft), authenticated as admin@local.test
+103 posts (3 draft), authenticated as admin@local.test
 33 approved reviews, products reachable
 ```
 
@@ -783,7 +783,7 @@ Three seeds exist:
 
 | Script | Creates | Technique |
 |---|---|---|
-| [`apps/cms/src/scripts/seed.ts`](../../apps/cms/src/scripts/seed.ts) | admin + API key, 10 categories, 88 guides with generated cover images, 1 page, site settings | Payload **Local API** |
+| [`apps/cms/src/scripts/seed.ts`](../../apps/cms/src/scripts/seed.ts) | admin + API key, 12 categories, 103 guides with generated cover images, 1 page, site settings | Payload **Local API** |
 | [`apps/commerce/src/scripts/seed.ts`](../../apps/commerce/src/scripts/seed.ts) (922 lines) | products, variants, prices, region, sales channel, stock | Medusa **workflows** |
 | [`apps/commerce/src/scripts/seed-reviews.ts`](../../apps/commerce/src/scripts/seed-reviews.ts) (117 lines) | 2–4 reviews per product from five templates, statuses mixed on purpose | the `create-review` **workflow** |
 

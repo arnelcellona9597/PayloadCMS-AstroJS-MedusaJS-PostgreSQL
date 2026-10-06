@@ -67,7 +67,7 @@ The databases are not empty — they hold a working knowledge base and catalogue
 
 | | Content |
 |---|---|
-| **Payload** | **88 developer guides** across 10 categories, each with a generated cover image. 85 published, 3 drafts left unpublished so the access-control rules have something to hide. The largest cluster is Deployment & Infrastructure — 12 guides on server sizing, hardening, systemd, TLS and backups. |
+| **Payload** | **103 developer guides** across 12 categories, each with a generated cover image. 100 published, 3 drafts left unpublished so the access-control rules have something to hide. They are **sorted into a reading order** — guide 1 is what to install, guide 103 is how to ship it — and the archive opens on that path rather than on publication date. |
 | **Medusa** | **15 infrastructure products** — VPS and managed hosting, managed PostgreSQL, CDN, WAF, monitoring, backups, premium plugins — with 40 plan tiers, prices in EUR and USD, and 45 reviews across approved, pending and rejected. |
 
 The guides answer the questions a WordPress developer actually asks on arriving
@@ -365,7 +365,7 @@ astro-payload-medusa/
 ├── postman/                   importable collection + environment (49 requests)
 └── apps/
     ├── cms/                   Payload 3 + Next 16       :3000
-    │   └── src/scripts/       seed.ts · guides/ (88 guides, 10 modules) · placeholders.ts
+    │   └── src/scripts/       seed.ts · guides/ (103 guides, 12 modules) · check-guides.ts
     ├── commerce/              Medusa 2                  :9000
     │   └── src/scripts/       seed.ts · catalogue.ts (15 products) · seed-reviews.ts
     └── storefront/            Astro 7 (node standalone) :4321
@@ -423,6 +423,9 @@ npm run db:import        # restore the newest backup (verifies, then confirms)
 
 npm run logs             # tail all three services
 npm run logs:errors      # just the warnings and errors
+
+npm run guides:check     # validate the 103 guides BEFORE seeding them
+npm run seed:cms         # re-seed Payload (destructive: clears posts first)
 
 npm test                 # 20 unit tests + the compensation test
 npm run postman:test     # 49 requests, 104 assertions, via newman

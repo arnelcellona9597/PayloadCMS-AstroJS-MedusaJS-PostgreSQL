@@ -14,7 +14,8 @@
     "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
     "start": "cross-env NODE_OPTIONS=--no-deprecation next start",
     "seed": "dotenv -e .env -- cross-env NODE_OPTIONS=--no-deprecation payload run src/scripts/seed.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "guides:check": "tsx src/scripts/check-guides.ts"
   },
   "dependencies": {
     "@payloadcms/db-postgres": "3.88.0",

@@ -254,6 +254,10 @@ export interface Post {
       }[]
     | null;
   publishedAt?: string | null;
+  /**
+   * Reading position in the learning path. Lower is earlier. Leave empty for standalone posts — they sort to the end.
+   */
+  order?: number | null;
   updatedAt: string;
   createdAt: string;
   _status?: ('draft' | 'published') | null;
@@ -505,6 +509,7 @@ export interface PostsSelect<T extends boolean = true> {
         id?: T;
       };
   publishedAt?: T;
+  order?: T;
   updatedAt?: T;
   createdAt?: T;
   _status?: T;
