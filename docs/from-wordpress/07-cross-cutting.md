@@ -43,18 +43,18 @@ npm run db:export
 ```
 
 ```
-── Exporting to backups/2026-10-04T10-29-34Z
-   payload_crud   148K
-   medusa_crud    460K
-   media          4.3M (96 files)
+── Exporting to backups/2026-10-06T08-33-34Z
+   payload_crud   260K
+   medusa_crud    452K
+   media          12M (264 files)
 
 ── Done
-   payload_crud   16 non-empty tables, 305 rows
+   payload_crud   16 non-empty tables, 835 rows
                   migrations: dev:-1
-   medusa_crud    58 non-empty tables, 1273 rows
+   medusa_crud    58 non-empty tables, 1469 rows
                   migrations: mikro_orm:180 links:21 scripts:5
    
-   Restore with:  npm run db:import -- backups/2026-10-04T10-29-34Z
+   Restore with:  npm run db:import -- backups/2026-10-06T08-33-34Z
 ```
 
 ⚠️ **`media.tar.gz` is the line to internalise.** Payload stores upload

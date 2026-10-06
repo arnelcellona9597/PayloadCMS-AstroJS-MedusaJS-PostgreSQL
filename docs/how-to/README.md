@@ -71,7 +71,7 @@ use the question index above and jump.
 
 | | [`../learn/`](../learn/README.md) | [`../from-wordpress/`](../from-wordpress/README.md) | `how-to/` (you are here) |
 |---|---|---|---|
-| Shape | 12 chapters, a course | 8 chapters, a mapping | 7 pages of recipes |
+| Shape | 13 chapters, a course | 8 chapters, a mapping | 7 pages of recipes |
 | Answers | *How does this work?* | *What did my WordPress thing become?* | *What do I type?* |
 | Typical sentence | "A collection is a schema definition." | "A collection is `register_post_type` and the ACF field group in one file." | "Open `apps/cms/src/collections/Posts.ts`, add the field, save, run `npm --prefix apps/cms run generate:types`." |
 | Use it when | you want the mechanism | you want the translation | you have a task in front of you |
@@ -186,7 +186,7 @@ curl -s -m 15 "$SF/api/health" | python3 -m json.tool
     "services": {
         "payload": {
             "ok": true,
-            "detail": "32 posts (3 draft), authenticated as admin@local.test",
+            "detail": "88 posts (3 draft), authenticated as admin@local.test",
             "url": "http://localhost:3000"
         },
         "medusa": {

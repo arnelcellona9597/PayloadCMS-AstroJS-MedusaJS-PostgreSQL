@@ -67,13 +67,15 @@ The databases are not empty — they hold a working knowledge base and catalogue
 
 | | Content |
 |---|---|
-| **Payload** | **32 developer guides** across 6 categories, each with a generated cover image. 29 published, 3 drafts left unpublished so the access-control rules have something to hide. |
+| **Payload** | **88 developer guides** across 10 categories, each with a generated cover image. 85 published, 3 drafts left unpublished so the access-control rules have something to hide. The largest cluster is Deployment & Infrastructure — 12 guides on server sizing, hardening, systemd, TLS and backups. |
 | **Medusa** | **15 infrastructure products** — VPS and managed hosting, managed PostgreSQL, CDN, WAF, monitoring, backups, premium plugins — with 40 plan tiers, prices in EUR and USD, and 45 reviews across approved, pending and rejected. |
 
 The guides answer the questions a WordPress developer actually asks on arriving
 here: how to create a post type, where `wp-config.php` went, whether there are
-SEO plugins, how to add a payment gateway. Content lives in
-[`apps/cms/src/scripts/guides.ts`](apps/cms/src/scripts/guides.ts) and
+SEO plugins, how to add a payment gateway, what server this actually needs.
+Content lives in
+[`apps/cms/src/scripts/guides/`](apps/cms/src/scripts/guides/) — one module per
+category — and
 [`apps/commerce/src/scripts/catalogue.ts`](apps/commerce/src/scripts/catalogue.ts) —
 edit those and re-run the seed.
 
@@ -363,7 +365,7 @@ astro-payload-medusa/
 ├── postman/                   importable collection + environment (49 requests)
 └── apps/
     ├── cms/                   Payload 3 + Next 16       :3000
-    │   └── src/scripts/       seed.ts · guides.ts (32 guides) · placeholders.ts
+    │   └── src/scripts/       seed.ts · guides/ (88 guides, 10 modules) · placeholders.ts
     ├── commerce/              Medusa 2                  :9000
     │   └── src/scripts/       seed.ts · catalogue.ts (15 products) · seed-reviews.ts
     └── storefront/            Astro 7 (node standalone) :4321

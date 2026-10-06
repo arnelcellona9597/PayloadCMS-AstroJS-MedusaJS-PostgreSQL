@@ -3,7 +3,7 @@ import { actions, isInputError } from 'astro:actions'
 
 import Layout from '../../layouts/Layout.astro'
 import { imageUrl } from '../../lib/types'
-import { listPosts } from '../../lib/payload'
+import { listPosts, listCategories } from '../../lib/payload'
 
 export const prerender = false
 
@@ -22,12 +22,48 @@ export const prerender = false
  */
 const deleteResult = Astro.getActionResult(actions.post.delete)
 
-const { docs: posts, totalDocs } = await listPosts({
-  limit: 50,
-  depth: 1,
-  includeDrafts: true,
-  sort: '-updatedAt',
-})
+/**
+ * Filtering and paging are read from the QUERY STRING and applied on the
+ * server, so both work with JavaScript disabled and every view is a URL you can
+ * share. Same approach as /monitor.
+ *
+ * ⚠️ Without this the page fetched a flat `limit: 50`. At 88 guides that
+ * silently hid 38 of them while still printing the true total — a truncated
+ * list with an accurate count, which is worse than either alternative because
+ * nothing looks wrong.
+ */
+const PER_PAGE = 20
+
+const url = Astro.url
+const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1)
+const categoryParam = url.searchParams.get('category')
+const categoryId = categoryParam ? Number(categoryParam) || undefined : undefined
+
+const [{ docs: categories }, result] = await Promise.all([
+  listCategories(),
+  listPosts({
+    limit: PER_PAGE,
+    page,
+    depth: 1,
+    includeDrafts: true,
+    sort: '-publishedAt',
+    categoryId,
+  }),
+])
+
+const { docs: posts, totalDocs, totalPages, hasPrevPage, hasNextPage } = result
+
+/** Preserve the other parameter when switching one of them. */
+const href = (next: { page?: number; category?: number | 'all' }) => {
+  const q = new URLSearchParams()
+  const cat = next.category === undefined ? categoryId : next.category === 'all' ? undefined : next.category
+  if (cat !== undefined) q.set('category', String(cat))
+  if (next.page !== undefined && next.page > 1) q.set('page', String(next.page))
+  const qs = q.toString()
+  return qs ? `/posts?${qs}` : '/posts'
+}
+
+const activeCategory = categories.find((c) => c.id === categoryId)
 
 const fmt = (iso: string) =>
   new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -56,11 +92,28 @@ const fmt = (iso: string) =>
     )
   }
 
-  <div class="row between" style="margin-bottom:20px">
+  <div class="row between" style="margin-bottom:14px">
     <p class="muted small" style="margin:0">
-      {totalDocs} posts, drafts included (this page sends the API key).
+      {totalDocs} {activeCategory ? `posts in ${activeCategory.name}` : 'posts'}, drafts included (this page sends the
+      API key).{totalPages > 1 && ` Page ${page} of ${totalPages}.`}
     </p>
     <a class="btn primary" href="/posts/new">New post</a>
+  </div>
+
+  <div class="row filters">
+    <a class:list={['btn', 'small', { active: categoryId === undefined }]} href={href({ category: 'all', page: 1 })}>
+      All
+    </a>
+    {
+      categories.map((category) => (
+        <a
+          class:list={['btn', 'small', { active: categoryId === category.id }]}
+          href={href({ category: category.id, page: 1 })}
+        >
+          {category.name}
+        </a>
+      ))
+    }
   </div>
 
   {
@@ -142,13 +195,37 @@ const fmt = (iso: string) =>
     )
   }
 
+  {
+    totalPages > 1 && (
+      <nav class="row between pager">
+        {hasPrevPage ? (
+          <a class="btn small" href={href({ page: page - 1 })}>
+            ← Previous
+          </a>
+        ) : (
+          <span class="btn small disabled">← Previous</span>
+        )}
+        <span class="small muted">
+          Page {page} of {totalPages}
+        </span>
+        {hasNextPage ? (
+          <a class="btn small" href={href({ page: page + 1 })}>
+            Next →
+          </a>
+        ) : (
+          <span class="btn small disabled">Next →</span>
+        )}
+      </nav>
+    )
+  }
+
   <div class="card" style="margin-top:28px">
     <h3>What just happened</h3>
     <p class="small muted" style="margin-bottom:8px">
       Every row above came from one request in this page's frontmatter:
     </p>
     <p class="mono small">
-      GET http://localhost:3000/api/posts?limit=50&depth=1&sort=-updatedAt<br />
+      GET http://localhost:3000/api/posts?limit=20&page=1&depth=1&sort=-publishedAt<br />
       Authorization: users API-Key ••••••••
     </p>
     <p class="small muted" style="margin-bottom:0">
@@ -173,5 +250,27 @@ const fmt = (iso: string) =>
     object-fit: cover;
     border-radius: 4px;
     border: 1px solid var(--border);
+  }
+
+  .filters {
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .btn.active {
+    background: var(--accent);
+    color: var(--surface);
+    border-color: var(--accent);
+  }
+
+  .btn.disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .pager {
+    margin-top: 22px;
+    align-items: center;
   }
 </style>
