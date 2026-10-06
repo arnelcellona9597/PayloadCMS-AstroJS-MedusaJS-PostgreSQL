@@ -16,7 +16,7 @@
  * ── Content lives in guides.ts ────────────────────────────────────────────
  *
  * This file is the mechanism: find-or-create, API keys, image generation,
- * Lexical construction. The 32 guides it writes are data, in ./guides.ts.
+ * Lexical construction. The guides it writes are data, in ./guides/.
  *
  * ── This seed DELETES before it writes ────────────────────────────────────
  *
@@ -320,7 +320,7 @@ const seed = async () => {
   /**
    * Sequential rather than parallel on purpose. Each iteration rasterises a PNG
    * and writes three files (the original plus the `thumbnail` and `card`
-   * derivatives sharp generates), and running 32 of those at once competes for
+   * derivatives sharp generates), and running all of those at once competes for
    * the same CPU without finishing any sooner.
    */
   let covers = 0

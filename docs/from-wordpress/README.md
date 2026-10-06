@@ -24,7 +24,7 @@ Two tracks, same repo, different entry points.
 |---|---|---|
 | Teaches | the stack from zero, in its own terms | the stack mapped onto what you already know |
 | Assumes | no prior stack knowledge, no particular background | deep WordPress knowledge, no stack knowledge |
-| Shape | 12 chapters, build-up order | 8 chapters, comparison order |
+| Shape | 13 chapters, build-up order | 8 chapters, comparison order |
 | Typical sentence | "A collection is a schema definition." | "A collection is `register_post_type` and the ACF field group in one file." |
 
 **Read either one first.** They are not prerequisites for each other. If you want
@@ -155,7 +155,7 @@ curl -s http://localhost:4321/api/health | python3 -m json.tool
     "services": {
         "payload": {
             "ok": true,
-            "detail": "32 posts (3 draft), authenticated as admin@local.test",
+            "detail": "88 posts (3 draft), authenticated as admin@local.test",
             "url": "http://localhost:3000"
         },
         "medusa": {
