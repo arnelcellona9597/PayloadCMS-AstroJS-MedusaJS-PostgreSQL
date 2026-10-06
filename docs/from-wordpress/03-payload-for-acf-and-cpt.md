@@ -609,9 +609,9 @@ media docs: 32
 (4 rows)
 ```
 
-**96 files for 32 documents** — the original plus the two derivatives sharp
+**264 files for 88 documents** — the original plus the two derivatives sharp
 generates from `imageSizes`. That ratio is the whole upload pipeline in one
-number: you uploaded 32 things and Payload wrote 96.
+number: you uploaded 88 things and Payload wrote 264.
 
 The generator is [`apps/cms/src/scripts/placeholders.ts`](../../apps/cms/src/scripts/placeholders.ts),
 which draws an SVG and rasterises it, and the upload itself is one Local API

@@ -36,6 +36,10 @@ const ACCENTS: Record<string, string> = {
   Commerce: '#9c2f2f',
   'Data & APIs': '#1f4f6b',
   'Operations & Tooling': '#4a3b6b',
+  'Deployment & Infrastructure': '#1f5f5b',
+  Security: '#6b2f4a',
+  Performance: '#5a6b1f',
+  'Testing & Quality': '#2f4a6b',
 }
 
 const FALLBACK = '#4a4a4a'
