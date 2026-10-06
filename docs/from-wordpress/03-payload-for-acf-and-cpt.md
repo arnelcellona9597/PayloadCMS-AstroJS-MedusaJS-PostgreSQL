@@ -609,7 +609,7 @@ media docs: 32
 (4 rows)
 ```
 
-**309 files for 103 documents** — the original plus the two derivatives sharp
+**363 files for 121 documents** — the original plus the two derivatives sharp
 generates from `imageSizes`. That ratio is the whole upload pipeline in one
 number: you uploaded 88 things and Payload wrote 264.
 

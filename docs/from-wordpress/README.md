@@ -155,7 +155,7 @@ curl -s http://localhost:4321/api/health | python3 -m json.tool
     "services": {
         "payload": {
             "ok": true,
-            "detail": "103 posts (3 draft), authenticated as admin@local.test",
+            "detail": "121 posts (3 draft), authenticated as admin@local.test",
             "url": "http://localhost:3000"
         },
         "medusa": {

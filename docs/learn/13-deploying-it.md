@@ -205,7 +205,7 @@ represents the current state and is marked applied.
 ### Move uploads off local disk — §9.7
 
 `apps/cms/public/media` is on the container's filesystem, so a rebuild loses
-every image. The seed writes 309 files there and they are not in git.
+every image. The seed writes 363 files there and they are not in git.
 
 Install `@payloadcms/storage-s3` and point it at any S3-compatible bucket —
 Hetzner Object Storage, Backblaze B2, Cloudflare R2. Until you do, **take the
